@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Send, Radio, Settings, Activity, Wifi, Zap, Cpu, Code, Globe, Lock, Play, Hash } from 'lucide-react';
 import { Visualizer } from './Visualizer';
 
@@ -24,7 +24,7 @@ export function DeployView({
     // Log protocol changes
     useEffect(() => {
         const p = protocols.find(x => x.id === protocol);
-        setLogs(prev => [...prev.slice(-5), `[CONFIG] Protocol set to ${p?.id.toUpperCase()}`]);
+        setLogs(prev => [...prev.slice(-49), `[CONFIG] Protocol set to ${p?.id.toUpperCase()}`]);
     }, [protocol]);
 
     // Mock export latency
@@ -33,10 +33,8 @@ export function DeployView({
     return (
         <div className="h-full flex flex-col bg-[#0A0A0A] text-zinc-300 animate-in fade-in zoom-in-95 duration-200 overflow-hidden relative">
 
-            {/* Background Viz (Full Screen, low opacity) */}
-            <div className="absolute inset-0 opacity-10 pointer-events-none z-0">
-                <Visualizer data={incomingData} selectedFeatures={selectedFeatures} width={800} height={400} />
-            </div>
+            {/* Background Viz - REMOVED for Windows performance */}
+            {/* Full-screen canvas rendering was causing severe lag on Windows */}
 
             {/* Header */}
             <div className="relative z-10 flex items-center justify-between p-6 border-b border-[#222] bg-[#0A0A0A]">
