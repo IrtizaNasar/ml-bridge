@@ -1,0 +1,99 @@
+{
+    "name": "ml-bridge",
+    "version": "1.0.0",
+    "description": "Universal Machine Learning Hub for Serial Bridge",
+    "main": "electron/main.js",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/IrtizaNasar/ml-bridge.git"
+    },
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
+        "preview": "vite preview",
+        "electron:dev": "concurrently -k \"cross-env BROWSER=none npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+        "electron:build": "vite build && electron-builder"
+    },
+    "keywords": [
+        "ml",
+        "electron",
+        "react",
+        "tensorflow.js"
+    ],
+    "author": "Irtiza Nasar",
+    "license": "MIT",
+    "dependencies": {
+        "@tensorflow-models/knn-classifier": "^1.2.6",
+        "@tensorflow-models/mobilenet": "^2.1.1",
+        "@tensorflow/tfjs": "^4.22.0",
+        "clsx": "^2.1.0",
+        "express": "^5.2.1",
+        "framer-motion": "^11.18.2",
+        "jszip": "^3.10.1",
+        "lucide-react": "^0.321.0",
+        "node-osc": "^11.1.1",
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0",
+        "socket.io": "^4.8.3",
+        "socket.io-client": "^4.8.3",
+        "tailwind-merge": "^2.2.1"
+    },
+    "devDependencies": {
+        "@vitejs/plugin-react": "^4.2.1",
+        "autoprefixer": "^10.4.17",
+        "concurrently": "^8.2.2",
+        "cross-env": "^7.0.3",
+        "electron": "^28.2.1",
+        "electron-builder": "^24.9.1",
+        "postcss": "^8.4.35",
+        "tailwindcss": "^3.4.1",
+        "vite": "^5.1.0",
+        "wait-on": "^7.2.0"
+    },
+    "build": {
+        "appId": "com.irtizanasar.ml-bridge",
+        "productName": "ML Bridge",
+        "files": [
+            "dist/**/*",
+            "electron/**/*",
+            "package.json"
+        ],
+        "publish": {
+            "provider": "github",
+            "owner": "IrtizaNasar",
+            "repo": "ml-bridge",
+            "releaseType": "release"
+        },
+        "directories": {
+            "output": "release"
+        },
+        "linux": {
+            "target": [
+                "AppImage",
+                "deb"
+            ],
+            "category": "Education",
+            "synopsis": "Machine Learning Bridge",
+            "description": "Visual ML Studio for Serial Bridge",
+            "executableName": "ml-bridge",
+            "maintainer": "Irtiza Nasar <irtizanasar@gmail.com>",
+            "icon": "build/icon.png"
+        },
+        "mac": {
+            "icon": "build/icon.icns",
+            "entitlements": "electron/entitlements.mac.plist",
+            "entitlementsInherit": "electron/entitlements.mac.plist",
+            "hardenedRuntime": true,
+            "gatekeeperAssess": false,
+            "extendInfo": {
+                "NSCameraUsageDescription": "ML Bridge requires access to the camera for visual input and machine learning training.",
+                "NSMicrophoneUsageDescription": "ML Bridge requires access to the microphone."
+            }
+        },
+        "win": {
+            "target": "nsis",
+            "icon": "build/icon.png"
+        }
+    }
+}

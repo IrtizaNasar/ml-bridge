@@ -1,0 +1,114 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    /* CLEAN DARK THEME + DREAMSHAPER POLISH */
+    --bg-app: #050505;
+    --bg-card: #0a0a0a;
+    --border-color: rgba(255, 255, 255, 0.08);
+
+    --color-primary: #10b981;
+    --grad-primary: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+body {
+    background-color: var(--bg-app);
+    /* Subtle dot grid from reference */
+    background-image: radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background-size: 24px 24px;
+    color: white;
+    font-family: 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+
+    /* Polished Card with inner light interaction */
+    .fui-panel {
+        background-color: #0a0a0a;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 1rem;
+        /* rounded-2xl */
+        position: relative;
+        overflow: hidden;
+        box-shadow: 0 4px 20px -1px rgba(0, 0, 0, 0.3);
+    }
+
+    /* The "Spotlight" glow effect for top edges */
+    .fui-panel::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: radial-gradient(circle at center, rgba(255, 255, 255, 0.15) 0%, transparent 80%);
+        opacity: 0.5;
+    }
+
+    /* DreamShaper Button Style */
+    .btn-dream {
+        /* @apply px-4 py-2 rounded-lg font-medium transition-all duration-200 border border-white/5 bg-white/[0.03] text-white/70; */
+        padding: 0.5rem 1rem;
+        border-radius: 0.5rem;
+        font-weight: 500;
+        transition: all 0.2s;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        background-color: rgba(255, 255, 255, 0.03);
+        color: rgba(255, 255, 255, 0.7);
+    }
+
+    .btn-dream:hover {
+        /* @apply bg-white/[0.08] text-white border-white/10 shadow-[...]; */
+        background-color: rgba(255, 255, 255, 0.08);
+        color: white;
+        border-color: rgba(255, 255, 255, 0.1);
+        box-shadow: 0 0 15px rgba(255, 255, 255, 0.05);
+    }
+
+    .btn-dream:active {
+        transform: scale(0.95);
+        background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    /* Primary Action Button */
+    .btn-primary-glow {
+        background: var(--grad-primary);
+        box-shadow: 0 0 20px rgba(16, 185, 129, 0.2);
+        color: white;
+        border: 1px solid transparent;
+        transition: all 0.2s;
+        /* @apply active:scale-95 hover:brightness-110; */
+    }
+
+    .btn-primary-glow:hover {
+        filter: brightness(1.1);
+    }
+
+    .btn-primary-glow:active {
+        transform: scale(0.95);
+    }
+
+    .font-mono-tech {
+        font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    }
+}
+
+/* Scrollbar - Clean & Minimal */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
