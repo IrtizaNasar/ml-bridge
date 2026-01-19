@@ -73,6 +73,8 @@ function App() {
 
     // Feature Selection
     const [selectedFeatures, setSelectedFeatures] = useState(new Set());
+    const [dataRefreshKey, setDataRefreshKey] = useState(0); // Trigger for DataView refresh
+
 
     const handleSelectInputSource = (source) => {
         // Don't confirm if switching to the same source
@@ -489,17 +491,31 @@ function App() {
         } catch (e) {
             console.error("Error clearing model:", e);
         }
-        // Reset to default classes and outputs
+
+        // Reset to default classes and outputs with empty thumbnails
         setClasses([
-            { id: 'class_1', name: 'Class 1', count: 0 },
-            { id: 'class_2', name: 'Class 2', count: 0 },
+            { id: 'class_1', name: 'Class 1', count: 0, thumbnails: [] },
+            { id: 'class_2', name: 'Class 2', count: 0, thumbnails: [] },
         ]);
         setOutputs([
-            { id: 'out_1', name: 'Parameter 1', value: 0.5, samples: 0 }
+            { id: 'out_1', name: 'Parameter 1', value: 0.5, samples: 0, thumbnails: [] }
         ]);
+
+        // Clear all prediction and training state
         setPrediction(null);
         setTrainingProgress(null);
-        setIsRunning(false); // Stop inference
+        setIsRunning(false);
+        setIsTraining(false);
+        setLastError(null);
+
+        // Clear auto-capture state
+        setIsCapturingAuto(false);
+        setRecordingClassId('class_1');
+
+        // Force DataView refresh
+        setDataRefreshKey(prev => prev + 1);
+
+        console.log('[App] Model cleared successfully');
     };
 
     const deleteSample = (index) => {
@@ -687,6 +703,82 @@ function App() {
         }
     };
 
+    // --- Data Import/Export Handlers ---
+    const handleSaveData = async () => {
+        try {
+            const data = mlEngine.exportData();
+            const jsonString = JSON.stringify(data, null, 2);
+
+            if (window.api && window.api.file) {
+                const result = await window.api.file.saveDataset(jsonString);
+                if (result.success) {
+                    console.log('[App] Dataset saved successfully:', result.filePath);
+                } else if (!result.canceled) {
+                    console.error('[App] Failed to save dataset:', result.error);
+                    setLastError('Failed to save dataset: ' + (result.error || 'Unknown error'));
+                }
+            } else {
+                console.error('[App] File API not available');
+                setLastError('File API not available. Are you running in Electron?');
+            }
+        } catch (e) {
+            console.error('[App] Save error:', e);
+            setLastError('Failed to save dataset: ' + e.message);
+        }
+    };
+
+    const handleLoadData = async () => {
+        try {
+            if (window.api && window.api.file) {
+                const result = await window.api.file.loadDataset();
+
+                if (result.canceled) {
+                    return; // User canceled
+                }
+
+                if (result.success && result.content) {
+                    const data = JSON.parse(result.content);
+                    const imported = mlEngine.importData(data);
+
+                    if (imported) {
+                        // Rebuild UI state from loaded data
+                        const classCounts = mlEngine.getClassCounts();
+                        const regCounts = mlEngine.getRegressionCounts();
+
+                        // Update classes state
+                        setClasses(prev => prev.map(c => ({
+                            ...c,
+                            count: classCounts[c.id] || 0
+                        })));
+
+                        // Update outputs state
+                        setOutputs(prev => prev.map(o => ({
+                            ...o,
+                            samples: regCounts[o.id] || 0
+                        })));
+
+                        // Clear prediction and training state
+                        setPrediction(null);
+                        setTrainingProgress(null);
+                        setIsRunning(false);
+
+                        console.log('[App] Dataset loaded successfully');
+                    } else {
+                        setLastError('Failed to import dataset. File may be corrupted.');
+                    }
+                } else {
+                    console.error('[App] Failed to load dataset:', result.error);
+                    setLastError('Failed to load dataset: ' + (result.error || 'Unknown error'));
+                }
+            } else {
+                console.error('[App] File API not available');
+                setLastError('File API not available. Are you running in Electron?');
+            }
+        } catch (e) {
+            console.error('[App] Load error:', e);
+            setLastError('Failed to load dataset: ' + e.message);
+        }
+    };
 
 
     return (
@@ -729,6 +821,9 @@ function App() {
                 onDeleteSample={deleteSample}
                 onUpload={handleUpload}
                 onTestUpload={handleTestUpload}
+                onSave={handleSaveData}
+                onLoad={handleLoadData}
+                dataRefreshKey={dataRefreshKey}
             />
 
             {/* Source Change Confirmation Modal */}

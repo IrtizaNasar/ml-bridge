@@ -87,8 +87,8 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
                     <div className="h-8 w-[1px] bg-[#222] mx-2"></div>
                     <button
                         onClick={async () => {
-                            const res = await onLoad();
-                            if (res && res.success) refreshData();
+                            await onLoad();
+                            refreshData();
                         }}
                         className="flex items-center gap-2 px-3 py-2 bg-[#111] hover:bg-[#1A1A1A] border border-[#222] hover:border-zinc-700 rounded-lg text-xs font-bold uppercase tracking-wider transition-all text-zinc-400 hover:text-white"
                     >

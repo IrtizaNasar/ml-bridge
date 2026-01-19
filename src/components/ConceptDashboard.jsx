@@ -416,7 +416,8 @@ export function ConceptDashboard({
     isCapturingAuto,
     recordingClassId,
     setRecordingClassId,
-    onExportWeb
+    onExportWeb,
+    dataRefreshKey
 }) {
     // Internal dashboard state (View switching)
     const [activeView, setActiveView] = useState('training'); // 'data' | 'training' | 'models' | 'deploy'
@@ -608,7 +609,12 @@ export function ConceptDashboard({
 
                         {/* DATA TAB (New) */}
                         {activeView === 'data' && (
-                            <DataView onLoad={onLoad} onSave={onSave} onDeleteSample={onDeleteSample} />
+                            <DataView
+                                onLoad={onLoad}
+                                onSave={onSave}
+                                onDeleteSample={onDeleteSample}
+                                key={dataRefreshKey}
+                            />
                         )}
 
                         {/* TRAINING VIEW (Existing) */}
