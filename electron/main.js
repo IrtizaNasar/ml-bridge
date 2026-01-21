@@ -186,14 +186,36 @@ function sendToSerialBridge(deviceId, predictionData) {
             confidences: predictionData.confidences
         });
 
-        // Serial Bridge expects: socket.emit('serial-send', { deviceId, data })
-        // This matches the pattern used by the client library's send() method
-        serialBridgeSocket.emit('serial-send', {
-            arduinoId: deviceId,  // Serial Bridge uses 'arduinoId' in its API
+        console.log(`[Serial Bridge] Attempting to send to ${deviceId}:`, message.substring(0, 100));
+
+        // Try multiple possible event names (we need to find the correct one)
+        // Based on Serial Bridge client library pattern
+
+        // Attempt 1: Direct send with arduinoId
+        serialBridgeSocket.emit('send', {
+            arduinoId: deviceId,
             data: message
         });
 
-        console.log(`[Serial Bridge] Sent to ${deviceId}:`, message.substring(0, 100));
+        // Attempt 2: Using 'serial-send' event
+        serialBridgeSocket.emit('serial-send', {
+            arduinoId: deviceId,
+            data: message
+        });
+
+        // Attempt 3: Using 'write' event (common pattern)
+        serialBridgeSocket.emit('write', {
+            arduinoId: deviceId,
+            data: message
+        });
+
+        // Attempt 4: Direct data emit
+        serialBridgeSocket.emit('data', {
+            arduinoId: deviceId,
+            message: message
+        });
+
+        console.log('[Serial Bridge] Sent via multiple event names - check Serial Bridge server logs');
     } catch (e) {
         console.error('[Serial Bridge] Send error:', e);
     }
