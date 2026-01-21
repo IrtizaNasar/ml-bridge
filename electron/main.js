@@ -172,7 +172,8 @@ async function sendToSerialBridge(deviceId, predictionData) {
         // Format data as JSON string (what Arduino expects)
         const message = JSON.stringify({
             // Simplified payload - only send label to reduce serial buffer load
-            label: predictionData.label
+            label: predictionData.label,
+            confidence: predictionData.confidence || Math.max(...Object.values(predictionData.confidences || {}))
         });
 
         console.log(`[Serial Bridge] Sending to ${deviceId} via HTTP:`, message.substring(0, 100));
