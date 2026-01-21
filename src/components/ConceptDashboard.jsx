@@ -419,7 +419,8 @@ export function ConceptDashboard({
     onExportWeb,
     dataRefreshKey,
     protocol, setProtocol,
-    targetDeviceId, setTargetDeviceId
+    targetDeviceId, setTargetDeviceId,
+    serialFormat, setSerialFormat
 }) {
     // Internal dashboard state (View switching)
     const [activeView, setActiveView] = useState('training'); // 'data' | 'training' | 'models' | 'deploy'
@@ -591,7 +592,7 @@ export function ConceptDashboard({
 
                                         {/* Collapsible embeddings section */}
                                         {embeddingEntries.length > 0 && (
-                                            <div className="pt-2 px-1">
+                                            <div className="py-2 px-1">
                                                 <button
                                                     onClick={() => setShowEmbeddings(!showEmbeddings)}
                                                     className="w-full flex items-center justify-between p-3 rounded border border-zinc-800 hover:border-zinc-700 bg-zinc-900/50 hover:bg-zinc-900 transition-all group"
