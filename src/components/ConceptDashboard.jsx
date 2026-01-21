@@ -544,11 +544,11 @@ export function ConceptDashboard({
 
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-3">
+                    <div className="flex-1 overflow-y-auto pt-3 px-3">
                         <div className="px-2 py-2 text-[10px] uppercase font-bold text-zinc-500 tracking-widest">
                             Input Features
                         </div>
-                        <div className="space-y-1 pb-8">
+                        <div className="space-y-1 pb-3">
                             {(() => {
                                 // Replicate Visualizer logic to determine shared colors
                                 const keys = Array.from(selectedFeatures || []).length > 0
