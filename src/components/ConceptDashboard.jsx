@@ -591,12 +591,12 @@ export function ConceptDashboard({
 
                                         {/* Collapsible embeddings section */}
                                         {embeddingEntries.length > 0 && (
-                                            <div className="pt-2">
+                                            <div className="pt-2 px-1">
                                                 <button
                                                     onClick={() => setShowEmbeddings(!showEmbeddings)}
-                                                    className="w-full flex items-center justify-between p-2 rounded border border-zinc-800 hover:border-zinc-700 bg-zinc-900/50 hover:bg-zinc-900 transition-all group"
+                                                    className="w-full flex items-center justify-between p-3 rounded border border-zinc-800 hover:border-zinc-700 bg-zinc-900/50 hover:bg-zinc-900 transition-all group"
                                                 >
-                                                    <div className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-3">
                                                         <ChevronDown size={12} className={`text-zinc-500 transition-transform ${showEmbeddings ? 'rotate-0' : '-rotate-90'}`} />
                                                         <span className="text-[10px] font-mono text-zinc-400 group-hover:text-zinc-300">MobileNet Embeddings</span>
                                                     </div>
