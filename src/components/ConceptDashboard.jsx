@@ -592,7 +592,7 @@ export function ConceptDashboard({
 
                                         {/* Collapsible embeddings section */}
                                         {embeddingEntries.length > 0 && (
-                                            <div className="pt-2 pb-2 px-1">
+                                            <div className="pt-2 pb-2 px-1 mb-3">
                                                 <button
                                                     onClick={() => setShowEmbeddings(!showEmbeddings)}
                                                     className="w-full flex items-center justify-between p-3 rounded border border-zinc-800 hover:border-zinc-700 bg-zinc-900/50 hover:bg-zinc-900 transition-all group"
