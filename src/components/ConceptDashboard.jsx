@@ -574,17 +574,6 @@ export function ConceptDashboard({
                                     return true;
                                 });
 
-                                // Show summary if embeddings are hidden
-                                if (shouldHideEmbeddings && Object.keys(incomingData).some(k => k.startsWith('f') && /^f\d+$/.test(k))) {
-                                    const embeddingCount = Object.keys(incomingData).filter(k => k.startsWith('f') && /^f\d+$/.test(k)).length;
-                                    return (
-                                        <div className="p-3 bg-emerald-500/5 border border-emerald-500/20 rounded text-center">
-                                            <div className="text-xs text-emerald-400 font-mono">{embeddingCount} embeddings active</div>
-                                            <div className="text-[9px] text-zinc-600 mt-1">MobileNet features (hidden)</div>
-                                        </div>
-                                    );
-                                }
-
                                 return entries.map(([key, val]) => {
                                     const index = keys.indexOf(key);
                                     const isActive = selectedFeatures?.has(key);
