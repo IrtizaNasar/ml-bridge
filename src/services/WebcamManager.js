@@ -54,15 +54,40 @@ class WebcamManager {
             this.canvas.width = 224;
             this.canvas.height = 224;
 
-            // Load MobileNet if not already loaded
+            // Load MobileNet with retry logic
             if (!this.model && !this.isModelLoading) {
                 this.isModelLoading = true;
-                this.model = await mobilenet.load({
-                    version: 2,
-                    alpha: 1.0,
-                    modelUrl: './models/mobilenet/model.json'
-                });
+                let attempts = 0;
+                const maxAttempts = 3;
+
+                while (attempts < maxAttempts && !this.model) {
+                    try {
+                        console.log(`[WebcamManager] Loading MobileNet (attempt ${attempts + 1}/${maxAttempts})...`);
+                        this.model = await mobilenet.load({
+                            version: 2,
+                            alpha: 1.0,
+                            modelUrl: './models/mobilenet/model.json'
+                        });
+                        console.log('[WebcamManager] ✓ MobileNet loaded successfully');
+                    } catch (err) {
+                        attempts++;
+                        console.error(`[WebcamManager] ✗ MobileNet load failed (attempt ${attempts}/${maxAttempts}):`, err);
+
+                        if (attempts < maxAttempts) {
+                            console.log('[WebcamManager] Retrying in 2 seconds...');
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                        } else {
+                            this.isModelLoading = false;
+                            throw new Error(`Failed to load MobileNet after ${maxAttempts} attempts. Please refresh the page.`);
+                        }
+                    }
+                }
                 this.isModelLoading = false;
+            }
+
+            // Wait for model to be ready before starting
+            if (!this.model) {
+                throw new Error('MobileNet model failed to load. Cannot start webcam.');
             }
 
             this.isActive = true;
