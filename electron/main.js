@@ -149,7 +149,17 @@ ipcMain.handle('ws-broadcast', (event, channel, data) => {
 // Serial Bridge HTTP API (uses HTTP POST, not Socket.IO)
 const fetch = require('electron-fetch').default;
 
+// Throttle Serial Bridge sends to prevent flooding Arduino
+let lastSerialSendTime = 0;
+const SERIAL_SEND_THROTTLE_MS = 100; // Send at most once per 100ms
 async function sendToSerialBridge(deviceId, predictionData) {
+    // Throttle: skip if we sent too recently
+    const now = Date.now();
+    if (now - lastSerialSendTime < SERIAL_SEND_THROTTLE_MS) {
+        return; // Skip this send
+    }
+    lastSerialSendTime = now;
+    
     try {
         // Format data as JSON string (what Arduino expects)
         const message = JSON.stringify({
