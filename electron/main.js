@@ -151,7 +151,7 @@ const fetch = require('electron-fetch').default;
 
 // Throttle Serial Bridge sends to prevent flooding Arduino
 let lastSerialSendTime = 0;
-const SERIAL_SEND_THROTTLE_MS = 100; // Send at most once per 100ms
+const SERIAL_SEND_THROTTLE_MS = 250; // Send at most once per 100ms
 async function sendToSerialBridge(deviceId, predictionData) {
     // Throttle: skip if we sent too recently
     const now = Date.now();
@@ -163,9 +163,8 @@ async function sendToSerialBridge(deviceId, predictionData) {
     try {
         // Format data as JSON string (what Arduino expects)
         const message = JSON.stringify({
-            label: predictionData.label,
-            confidence: predictionData.confidence || Math.max(...Object.values(predictionData.confidences || {})),
-            confidences: predictionData.confidences
+            // Simplified payload - only send label to reduce serial buffer load
+            label: predictionData.label
         });
 
         console.log(`[Serial Bridge] Sending to ${deviceId} via HTTP:`, message.substring(0, 100));
