@@ -32,6 +32,12 @@ contextBridge.exposeInMainWorld('api', {
     ws: {
         broadcast: (channel, data) => ipcRenderer.invoke('ws-broadcast', channel, data)
     },
+    // Serial Bridge (for Arduino device routing)
+    serialBridge: {
+        connect: () => ipcRenderer.invoke('serial-bridge-connect'),
+        disconnect: () => ipcRenderer.invoke('serial-bridge-disconnect'),
+        status: () => ipcRenderer.invoke('serial-bridge-status')
+    },
     // File Management
     file: {
         saveDataset: (jsonString) => ipcRenderer.invoke('save-dataset', jsonString),

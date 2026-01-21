@@ -199,6 +199,29 @@ function sendToSerialBridge(deviceId, predictionData) {
     }
 }
 
+// IPC Handlers for Serial Bridge connection management
+ipcMain.handle('serial-bridge-connect', () => {
+    console.log('[Serial Bridge] Connection requested from renderer');
+    connectToSerialBridge();
+    return { success: true };
+});
+
+ipcMain.handle('serial-bridge-disconnect', () => {
+    if (serialBridgeSocket) {
+        console.log('[Serial Bridge] Disconnecting...');
+        serialBridgeSocket.disconnect();
+        serialBridgeSocket = null;
+    }
+    return { success: true };
+});
+
+ipcMain.handle('serial-bridge-status', () => {
+    return {
+        connected: serialBridgeSocket && serialBridgeSocket.connected,
+        url: 'http://localhost:3000'
+    };
+});
+
 // Universal Input Hub Placeholder
 ipcMain.handle('get-app-version', () => app.getVersion());
 

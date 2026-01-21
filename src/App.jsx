@@ -79,6 +79,22 @@ function App() {
     const [protocol, setProtocol] = useState('osc'); // 'osc' | 'ws' | 'serial'
     const [targetDeviceId, setTargetDeviceId] = useState(''); // For Serial Bridge routing
 
+    // Connect/disconnect Serial Bridge based on protocol selection
+    useEffect(() => {
+        if (protocol === 'serial') {
+            console.log('[App] Connecting to Serial Bridge...');
+            if (window.api && window.api.serialBridge) {
+                window.api.serialBridge.connect();
+            }
+        } else {
+            // Disconnect when switching away from serial protocol
+            if (window.api && window.api.serialBridge) {
+                window.api.serialBridge.disconnect();
+            }
+        }
+    }, [protocol]);
+
+
 
     const handleSelectInputSource = (source) => {
         // Don't confirm if switching to the same source
