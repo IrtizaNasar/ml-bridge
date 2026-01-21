@@ -424,6 +424,7 @@ export function ConceptDashboard({
     // Internal dashboard state (View switching)
     const [activeView, setActiveView] = useState('training'); // 'data' | 'training' | 'models' | 'deploy'
     const [showAdvancedTraining, setShowAdvancedTraining] = useState(false); // New: Collapse advanced settings
+    const [showEmbeddings, setShowEmbeddings] = useState(false); // Toggle for showing MobileNet embeddings
     // outputProtocol removed - now managed in App.jsx and passed as props
 
     // Auto-switch to monitor when running - NOW switch to DEPLOY tab (Monitor moved there)
@@ -543,8 +544,16 @@ export function ConceptDashboard({
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-3">
-                        <div className="px-2 py-2 text-[10px] uppercase font-bold text-zinc-500 tracking-widest">
-                            Input Features
+                        <div className="px-2 py-2 text-[10px] uppercase font-bold text-zinc-500 tracking-widest flex items-center justify-between">
+                            <span>Input Features</span>
+                            {inputSource === 'webcam' && Object.keys(incomingData).some(k => k.startsWith('f') && /^f\d+$/.test(k)) && (
+                                <button
+                                    onClick={() => setShowEmbeddings(!showEmbeddings)}
+                                    className="text-[9px] px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors"
+                                >
+                                    {showEmbeddings ? 'Hide' : 'Show'} Embeddings
+                                </button>
+                            )}
                         </div>
                         <div className="space-y-1">
                             {(() => {
@@ -556,7 +565,27 @@ export function ConceptDashboard({
                                 // Technical palette (matching Visualizer.jsx)
                                 const colors = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
-                                return Object.entries(incomingData).map(([key, val]) => {
+                                // Filter out MobileNet features if webcam and embeddings hidden
+                                const shouldHideEmbeddings = inputSource === 'webcam' && !showEmbeddings;
+                                const entries = Object.entries(incomingData).filter(([key]) => {
+                                    if (shouldHideEmbeddings && key.startsWith('f') && /^f\d+$/.test(key)) {
+                                        return false; // Hide f0, f1, ... f1023
+                                    }
+                                    return true;
+                                });
+
+                                // Show summary if embeddings are hidden
+                                if (shouldHideEmbeddings && Object.keys(incomingData).some(k => k.startsWith('f') && /^f\d+$/.test(k))) {
+                                    const embeddingCount = Object.keys(incomingData).filter(k => k.startsWith('f') && /^f\d+$/.test(k)).length;
+                                    return (
+                                        <div className="p-3 bg-emerald-500/5 border border-emerald-500/20 rounded text-center">
+                                            <div className="text-xs text-emerald-400 font-mono">{embeddingCount} embeddings active</div>
+                                            <div className="text-[9px] text-zinc-600 mt-1">MobileNet features (hidden)</div>
+                                        </div>
+                                    );
+                                }
+
+                                return entries.map(([key, val]) => {
                                     const index = keys.indexOf(key);
                                     const isActive = selectedFeatures?.has(key);
                                     const color = index !== -1 ? colors[index % colors.length] : '#888';
