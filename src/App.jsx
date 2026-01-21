@@ -78,6 +78,19 @@ function App() {
     // Deploy/Output Protocol Configuration
     const [protocol, setProtocol] = useState('osc'); // 'osc' | 'ws' | 'serial'
     const [targetDeviceId, setTargetDeviceId] = useState(''); // For Serial Bridge routing
+    // Refs for protocol and deviceId to avoid stale closures in prediction callbacks
+    const protocolRef = useRef(protocol);
+    const targetDeviceIdRef = useRef(targetDeviceId);
+    
+    // Sync refs with state
+    useEffect(() => {
+        protocolRef.current = protocol;
+    }, [protocol]);
+    
+    useEffect(() => {
+        targetDeviceIdRef.current = targetDeviceId;
+    }, [targetDeviceId]);
+
 
     // Connect/disconnect Serial Bridge based on protocol selection
     useEffect(() => {
@@ -296,8 +309,8 @@ function App() {
                             if (window.api && window.api.ws) {
                                 window.api.ws.broadcast('prediction', {
                                     ...result,
-                                    protocol: protocol,
-                                    deviceId: protocol === 'serial' ? targetDeviceId : null
+                                    protocol: protocolRef.current,
+                                    deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null
                                 });
                             }
                         }
@@ -395,8 +408,8 @@ function App() {
                         if (window.api && window.api.ws) {
                             window.api.ws.broadcast('prediction', {
                                 ...result,
-                                protocol: protocol,
-                                deviceId: protocol === 'serial' ? targetDeviceId : null
+                                protocol: protocolRef.current,
+                                deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null
                             });
                         }
                     }
@@ -416,8 +429,8 @@ function App() {
                             if (window.api && window.api.ws) {
                                 window.api.ws.broadcast('prediction', {
                                     ...result,
-                                    protocol: protocol,
-                                    deviceId: protocol === 'serial' ? targetDeviceId : null
+                                    protocol: protocolRef.current,
+                                    deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null
                                 });
                             }
                         }
@@ -441,8 +454,8 @@ function App() {
                         if (window.api && window.api.ws) {
                             window.api.ws.broadcast('prediction', {
                                 ...result,
-                                protocol: protocol,
-                                deviceId: protocol === 'serial' ? targetDeviceId : null
+                                protocol: protocolRef.current,
+                                deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null
                             });
                         }
 
