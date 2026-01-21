@@ -139,45 +139,10 @@ ipcMain.handle('ws-broadcast', (event, channel, data) => {
     }
 });
 
-// Serial Bridge Client Connection
-const socketIOClient = require('socket.io-client');
-let serialBridgeSocket = null;
+// Serial Bridge HTTP API (uses HTTP POST, not Socket.IO)
+const fetch = require('electron-fetch').default;
 
-function connectToSerialBridge() {
-    if (serialBridgeSocket && serialBridgeSocket.connected) {
-        return;
-    }
-
-    try {
-        serialBridgeSocket = socketIOClient('http://localhost:3000', {
-            reconnection: true,
-            reconnectionDelay: 1000,
-            reconnectionAttempts: 5
-        });
-
-        serialBridgeSocket.on('connect', () => {
-            console.log('[Serial Bridge] Connected to Serial Bridge server');
-        });
-
-        serialBridgeSocket.on('disconnect', () => {
-            console.log('[Serial Bridge] Disconnected from Serial Bridge server');
-        });
-
-        serialBridgeSocket.on('connect_error', (error) => {
-            console.log('[Serial Bridge] Connection error:', error.message);
-        });
-    } catch (e) {
-        console.error('[Serial Bridge] Failed to connect:', e);
-    }
-}
-
-function sendToSerialBridge(deviceId, predictionData) {
-    if (!serialBridgeSocket || !serialBridgeSocket.connected) {
-        console.log('[Serial Bridge] Not connected, attempting to connect...');
-        connectToSerialBridge();
-        return;
-    }
-
+async function sendToSerialBridge(deviceId, predictionData) {
     try {
         // Format data as JSON string (what Arduino expects)
         const message = JSON.stringify({
@@ -186,61 +151,45 @@ function sendToSerialBridge(deviceId, predictionData) {
             confidences: predictionData.confidences
         });
 
-        console.log(`[Serial Bridge] Attempting to send to ${deviceId}:`, message.substring(0, 100));
+        console.log(`[Serial Bridge] Sending to ${deviceId} via HTTP:`, message.substring(0, 100));
 
-        // Try multiple possible event names (we need to find the correct one)
-        // Based on Serial Bridge client library pattern
-
-        // Attempt 1: Direct send with arduinoId
-        serialBridgeSocket.emit('send', {
-            arduinoId: deviceId,
-            data: message
+        // Serial Bridge uses HTTP POST to /api/send
+        const response = await fetch('http://localhost:3000/api/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id: deviceId,
+                data: message
+            })
         });
 
-        // Attempt 2: Using 'serial-send' event
-        serialBridgeSocket.emit('serial-send', {
-            arduinoId: deviceId,
-            data: message
-        });
+        const result = await response.json();
 
-        // Attempt 3: Using 'write' event (common pattern)
-        serialBridgeSocket.emit('write', {
-            arduinoId: deviceId,
-            data: message
-        });
-
-        // Attempt 4: Direct data emit
-        serialBridgeSocket.emit('data', {
-            arduinoId: deviceId,
-            message: message
-        });
-
-        console.log('[Serial Bridge] Sent via multiple event names - check Serial Bridge server logs');
+        if (result.success) {
+            console.log(`[Serial Bridge] ✓ Successfully sent to ${deviceId}`);
+        } else {
+            console.error('[Serial Bridge] ✗ Send failed:', result.error || 'Unknown error');
+        }
     } catch (e) {
-        console.error('[Serial Bridge] Send error:', e);
+        console.error('[Serial Bridge] HTTP request error:', e.message);
     }
 }
 
 // IPC Handlers for Serial Bridge connection management
 ipcMain.handle('serial-bridge-connect', () => {
-    console.log('[Serial Bridge] Connection requested from renderer');
-    connectToSerialBridge();
-    return { success: true };
+    console.log('[Serial Bridge] Connection check - Serial Bridge uses HTTP, no persistent connection needed');
+    return { success: true, message: 'Serial Bridge uses HTTP POST, no connection required' };
 });
 
 ipcMain.handle('serial-bridge-disconnect', () => {
-    if (serialBridgeSocket) {
-        console.log('[Serial Bridge] Disconnecting...');
-        serialBridgeSocket.disconnect();
-        serialBridgeSocket = null;
-    }
+    console.log('[Serial Bridge] Disconnect called - Serial Bridge uses HTTP, nothing to disconnect');
     return { success: true };
 });
 
 ipcMain.handle('serial-bridge-status', () => {
     return {
-        connected: serialBridgeSocket && serialBridgeSocket.connected,
-        url: 'http://localhost:3000'
+        connected: true, // HTTP is stateless, always "connected"
+        url: 'http://localhost:3000/api/send'
     };
 });
 
