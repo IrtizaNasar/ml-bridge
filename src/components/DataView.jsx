@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Database, Filter, Download, Upload, Trash2, Search, Table, RefreshCw } from 'lucide-react';
 import { mlEngine } from '../services/MLEngine';
 
@@ -9,12 +9,7 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
     const [selectedClass, setSelectedClass] = useState('all');
     const [isLoading, setIsLoading] = useState(false);
 
-    // Load data from memory on mount
-    useEffect(() => {
-        refreshData();
-    }, []);
-
-    const refreshData = () => {
+    const handleRefresh = useCallback(() => {
         setIsLoading(true);
         const rawData = mlEngine.denseData || [];
 
@@ -37,23 +32,40 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
         });
 
         setTimeout(() => setIsLoading(false), 300);
-    };
+    }, []);
 
-    const handleDelete = (index) => {
+    const handleDelete = useCallback((index) => {
         if (onDeleteSample) {
             onDeleteSample(index);
-            refreshData(); // Refresh UI after delete
+            handleRefresh();
         }
-    };
+    }, [onDeleteSample, handleRefresh]);
 
-    const filteredSamples = samples.filter(s => {
-        const matchesSearch = s.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            s.valPreview.includes(searchQuery);
-        const matchesClass = selectedClass === 'all' || s.label === selectedClass;
-        return matchesSearch && matchesClass;
-    });
+    const filteredSamples = useMemo(() => {
+        return samples.filter(s => {
+            const matchesSearch = s.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                s.valPreview.includes(searchQuery);
+            const matchesClass = selectedClass === 'all' || s.label === selectedClass;
+            return matchesSearch && matchesClass;
+        });
+    }, [samples, searchQuery, selectedClass]);
 
-    const uniqueClasses = Array.from(new Set(samples.map(s => s.label)));
+    const uniqueClasses = useMemo(() => {
+        return Array.from(new Set(samples.map(s => s.label)));
+    }, [samples]);
+
+    const handleSearchChange = useCallback((e) => {
+        setSearchQuery(e.target.value);
+    }, []);
+
+    const handleClassChange = useCallback((e) => {
+        setSelectedClass(e.target.value);
+    }, []);
+
+    const handleLoadClick = useCallback(async () => {
+        await onLoad();
+        handleRefresh();
+    }, [onLoad, handleRefresh]);
 
     return (
         <div className="h-full flex flex-col bg-[#0A0A0A] text-zinc-300 animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
@@ -78,7 +90,7 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
 
                 <div className="flex items-center gap-2 self-end md:self-auto">
                     <button
-                        onClick={refreshData}
+                        onClick={handleRefresh}
                         className="p-2 hover:bg-[#111] rounded-lg text-zinc-500 hover:text-white transition-all border border-transparent hover:border-zinc-800"
                         title="Refresh Data"
                     >
@@ -86,10 +98,7 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
                     </button>
                     <div className="h-8 w-[1px] bg-[#222] mx-2"></div>
                     <button
-                        onClick={async () => {
-                            await onLoad();
-                            refreshData();
-                        }}
+                        onClick={handleLoadClick}
                         className="flex items-center gap-2 px-3 py-2 bg-[#111] hover:bg-[#1A1A1A] border border-[#222] hover:border-zinc-700 rounded-lg text-xs font-bold uppercase tracking-wider transition-all text-zinc-400 hover:text-white"
                     >
                         <Upload size={14} /> Import
@@ -113,7 +122,7 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
                             type="text"
                             placeholder="Search samples..."
                             value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onChange={handleSearchChange}
                             className="w-full bg-[#050505] border border-[#222] rounded-lg pl-9 pr-4 py-2 text-xs font-mono text-zinc-300 focus:outline-none focus:border-blue-500/50 transition-all placeholder-zinc-700"
                         />
                     </div>
@@ -123,7 +132,7 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
                         <Filter size={14} className="text-zinc-600" />
                         <select
                             value={selectedClass}
-                            onChange={(e) => setSelectedClass(e.target.value)}
+                            onChange={handleClassChange}
                             className="bg-transparent text-xs font-bold uppercase tracking-wider text-zinc-400 focus:outline-none cursor-pointer hover:text-white transition-colors [&>option]:bg-[#111]"
                         >
                             <option value="all">All Classes</option>
@@ -173,7 +182,7 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
                                     </td>
                                     <td className="px-6 py-4 text-right">
                                         <button
-                                            onClick={() => handleDelete(sample.id)}
+                                            onClick={handleDelete(sample.id)}
                                             className="text-zinc-600 hover:text-red-400 p-2 rounded-lg hover:bg-red-500/10 transition-all border border-transparent hover:border-red-500/20"
                                             title="Delete Sample"
                                         >
