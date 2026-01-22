@@ -27,9 +27,10 @@ class WebcamManager {
     }
 
     async start(callback) {
-        if (this.isActive) return;
-
+        // Always update callback, even if already running
         this.onDataCallback = callback;
+
+        if (this.isActive) return;
 
         try {
             // Initialize Video

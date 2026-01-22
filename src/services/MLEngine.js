@@ -170,8 +170,8 @@ class MLEngine {
 
                 if (predictedVal !== null) {
                     // Exponential Moving Average (EMA) smoothing
-                    // alpha = 0.2: 20% new value, 80% previous value
-                    const alpha = 0.2;
+                    // alpha = 0.15: 15% new value, 85% previous value for stability
+                    const alpha = 0.15;
                     const previous = this.previousRegressionValues[outId] !== undefined
                         ? this.previousRegressionValues[outId]
                         : predictedVal;
@@ -427,7 +427,16 @@ class MLEngine {
             const regression = {};
             if (this.regressionOutputIds && this.regressionOutputIds.length === data.length) {
                 this.regressionOutputIds.forEach((id, idx) => {
-                    regression[id] = data[idx];
+                    // Apply EMA smoothing (same as KNN regression)
+                    const alpha = 0.15; // 15% new value, 85% previous value for stability
+                    const rawValue = data[idx];
+                    const previous = this.previousRegressionValues[id] !== undefined
+                        ? this.previousRegressionValues[id]
+                        : rawValue;
+
+                    const smoothed = (alpha * rawValue) + ((1 - alpha) * previous);
+                    this.previousRegressionValues[id] = smoothed;
+                    regression[id] = smoothed;
                 });
             } else {
                 // Fallback: return as array if IDs not available

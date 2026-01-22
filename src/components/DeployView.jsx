@@ -86,10 +86,10 @@ export function DeployView({
                                                         return (
                                                             <div key={id} className="text-center">
                                                                 <div className="text-xs font-bold text-zinc-400 mb-1">{output?.name || id}</div>
-                                                                <div className="text-4xl font-light text-white tracking-tighter mb-2">{val.toFixed(3)}</div>
+                                                                <div className="text-4xl font-light text-white tracking-tighter mb-2">{val.toFixed(2)}</div>
                                                                 <div className="w-full h-1 bg-zinc-900 rounded-full overflow-hidden">
                                                                     <div
-                                                                        className="h-full bg-emerald-500 transition-all duration-75"
+                                                                        className="h-full bg-emerald-500"
                                                                         style={{ width: `${Math.min(100, Math.max(0, val * 100))}%` }}
                                                                     ></div>
                                                                 </div>

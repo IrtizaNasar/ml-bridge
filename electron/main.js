@@ -76,9 +76,10 @@ function startWebSocketServer() {
 
         // Serve static files (client library)
         // Access via: http://localhost:3100/ml-bridge.js
+        // Use app.getAppPath() for production compatibility
         const publicPath = isDev
             ? path.join(__dirname, '../public')
-            : path.join(app.getAppPath(), 'public');
+            : path.join(process.resourcesPath, 'app.asar.unpacked/public');
 
         expressApp.use(express.static(publicPath));
 
@@ -153,36 +154,59 @@ let lastSerialSendTime = 0;
 let lastSentLabel = null; // Track last sent label for change detection
 const SERIAL_SEND_THROTTLE_MS = 500; // Send at most once per 500ms
 async function sendToSerialBridge(deviceId, predictionData) {
-    // Only send if label changed (smart throttling)
-    if (predictionData.label === lastSentLabel) {
-        return; // Skip - same prediction as last time
+    // Detect prediction type
+    const isRegression = predictionData.regression !== undefined;
+    const isClassification = predictionData.label !== undefined;
+
+    if (!isClassification && !isRegression) {
+        console.warn('[Serial Bridge] Unknown prediction type, skipping');
+        return;
     }
 
-    // Also apply time-based throttle as backup
-    const now = Date.now();
-    if (now - lastSerialSendTime < SERIAL_SEND_THROTTLE_MS) {
-        return; // Skip - sent too recently
+    // Apply appropriate throttling
+    if (isClassification) {
+        // Classification: throttle by label change
+        if (predictionData.label === lastSentLabel) {
+            return; // Skip - same prediction
+        }
+        lastSentLabel = predictionData.label;
+        lastSerialSendTime = Date.now();
+    } else if (isRegression) {
+        // Regression: time-based throttle only (values change continuously)
+        const now = Date.now();
+        if (now - lastSerialSendTime < SERIAL_SEND_THROTTLE_MS) {
+            return;
+        }
+        lastSerialSendTime = now;
+        lastSentLabel = null; // Reset for when switching back to classification
     }
-
-    lastSentLabel = predictionData.label;
-    lastSerialSendTime = now;
 
     try {
         let message;
 
-        // Format based on selected format (JSON or CSV)
-        if (predictionData.serialFormat === 'csv') {
-            // CSV Format: label,confidence
-            // Example: class_1,0.85
-            const confidence = predictionData.confidence || Math.max(...Object.values(predictionData.confidences || {}));
-            message = `${predictionData.label},${confidence.toFixed(2)}`;
-        } else {
-            // JSON Format (Default)
-            // Example: {"label":"class_1","confidence":0.85}
-            message = JSON.stringify({
-                label: predictionData.label,
-                confidence: predictionData.confidence || Math.max(...Object.values(predictionData.confidences || {}))
-            });
+        if (isClassification) {
+            // Classification formatting
+            if (predictionData.serialFormat === 'csv') {
+                // CSV: label,confidence
+                const confidence = predictionData.confidence || Math.max(...Object.values(predictionData.confidences || {}));
+                message = `${predictionData.label},${confidence.toFixed(2)}`;
+            } else {
+                // JSON: {"label":"class_1","confidence":0.85}
+                message = JSON.stringify({
+                    label: predictionData.label,
+                    confidence: predictionData.confidence || Math.max(...Object.values(predictionData.confidences || {}))
+                });
+            }
+        } else if (isRegression) {
+            // Regression formatting
+            if (predictionData.serialFormat === 'csv') {
+                // CSV: comma-separated values (e.g., "0.48,1.00")
+                const values = Object.values(predictionData.regression);
+                message = values.map(v => v.toFixed(2)).join(',');
+            } else {
+                // JSON: {"out_1":0.48,"out_2":1.00}
+                message = JSON.stringify(predictionData.regression);
+            }
         }
 
         console.log(`[Serial Bridge] Sending to ${deviceId} via HTTP:`, message.substring(0, 100));

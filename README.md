@@ -31,7 +31,8 @@ It is designed to sit perfectly between **Serial Bridge** (for hardware data) an
   - [KNN vs. Dense Engines](#knn-vs-dense-engines)
 - [Deployment](#deployment)
   - [OSC Output](#osc-output)
-
+  - [Arduino Integration](#arduino-integration)
+  - [WebSocket Output](#websocket-output)
 - [Troubleshooting](#troubleshooting)
 
 ## Features
@@ -203,18 +204,148 @@ ML Bridge broadcasts results to `127.0.0.1:12000` (configurable).
 *   **Args**: `[OutputID (string), Value (float)]`
 *   **Example**: `/ml/regression` `["out_1", 0.75]`
 
-### Serial Bridge (Arduino)
+### Arduino Integration
 
 Send predictions directly to Arduino or other microcontrollers via Serial Bridge.
 
+#### Setup
+
 1. Go to **Deploy** tab
-2. Select **Serial Bridge**
-3. Enter your device ID (e.g., `arduino_1`)
-4. Choose data format: **JSON** or **CSV**
+2. Select **Serial Bridge** protocol
+3. Enter your device ID (e.g., `arduino`)
+4. Choose data format: **JSON** (recommended) or **CSV**
+   - **JSON is faster** - less parsing overhead, lower latency
+   - CSV may have slight lag due to string parsing
 
-**📖 [Complete Arduino Integration Guide](docs/ARDUINO_INTEGRATION.md)**
+#### Connection Methods
 
-Includes step-by-step setup, code examples for both formats, LED control, servo motors, and troubleshooting tips.
+**USB Serial (Easiest)**
+- Connect Arduino via USB
+- Add device in Serial Bridge app
+- Use the USB Serial sketch below
+
+**Bluetooth (Wireless)**
+- Requires Arduino with BLE (e.g., Uno R4 WiFi, Nano 33 BLE)
+- Device advertises as "ML-Bridge-LED"
+- Use the Bluetooth sketch below
+
+#### Example: LED Control
+
+Control an LED based on classification predictions (class_1 = ON, class_2 = OFF).
+
+**Wiring:**
+- LED positive (long leg) → Pin 2
+- LED negative (short leg) → GND (through 220Ω resistor)
+
+**USB Serial Sketch** ([`arduino_serial_led_control.ino`](arduino_serial_led_control.ino)):
+```cpp
+const int LED_PIN = 2;
+String receivedData = "";
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+}
+
+void loop() {
+  while (Serial.available() > 0) {
+    char c = Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (receivedData.length() > 0) {
+        processData(receivedData);
+        receivedData = "";
+      }
+    } else {
+      receivedData += c;
+    }
+  }
+}
+
+void processData(String data) {
+  data.trim();
+  String label = "";
+  
+  // Parse JSON: {"label":"class_1","confidence":0.85}
+  if (data.indexOf("{") >= 0) {
+    int labelStart = data.indexOf("\"label\":\"") + 9;
+    int labelEnd = data.indexOf("\"", labelStart);
+    if (labelEnd > labelStart) {
+      label = data.substring(labelStart, labelEnd);
+    }
+  }
+  // Parse CSV: class_1,0.85
+  else if (data.indexOf(",") > 0) {
+    label = data.substring(0, data.indexOf(","));
+  }
+  // Plain label
+  else {
+    label = data;
+  }
+  
+  // Control LED
+  if (label.indexOf("class_1") >= 0) {
+    digitalWrite(LED_PIN, HIGH);
+  } else if (label.indexOf("class_2") >= 0) {
+    digitalWrite(LED_PIN, LOW);
+  }
+}
+```
+
+**Bluetooth Sketch** ([`arduino_bluetooth_led_control.ino`](arduino_bluetooth_led_control.ino)):
+```cpp
+#include <ArduinoBLE.h>
+
+const int LED_PIN = 2;
+
+BLEService uartService("6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
+BLECharacteristic rxCharacteristic("6E400002-B5A3-F393-E0A9-E50E24DCCA9E", BLEWrite, 512);
+
+String receivedData = "";
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_PIN, OUTPUT);
+  
+  BLE.begin();
+  BLE.setLocalName("ML-Bridge-LED");
+  BLE.setAdvertisedService(uartService);
+  uartService.addCharacteristic(rxCharacteristic);
+  BLE.addService(uartService);
+  BLE.advertise();
+}
+
+void loop() {
+  BLEDevice central = BLE.central();
+  
+  if (central && central.connected()) {
+    if (rxCharacteristic.written()) {
+      // Read and process data (same parsing logic as USB version)
+      // See full code in arduino_bluetooth_led_control.ino
+    }
+  }
+}
+```
+
+**Full code samples available in repository root.**
+
+#### Data Formats
+
+**Classification:**
+- JSON: `{"label":"class_1","confidence":0.85}`
+- CSV: `class_1,0.85`
+
+**Regression:**
+- JSON: `{"out_1":0.48,"out_2":1.00}`
+- CSV: `0.48,1.00`
+
+#### Troubleshooting
+
+- **No data received**: Check Serial Bridge is connected and device ID matches
+- **LED not responding**: Verify baud rate is 115200 for USB Serial
+- **Bluetooth not connecting**: Ensure device name is "ML-Bridge-LED" and BLE is advertising
+- **Lag with CSV**: Switch to JSON format for better performance
+
 
 ### WebSocket Output
 
