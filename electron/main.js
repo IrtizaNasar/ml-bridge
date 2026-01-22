@@ -3,6 +3,7 @@ const path = require('path');
 const isDev = process.env.NODE_ENV === 'development';
 
 let mainWindow;
+let connectedSockets = new Set(); // Track Socket.IO connections for cleanup
 
 function createWindow() {
     mainWindow = new BrowserWindow({
@@ -60,6 +61,15 @@ app.on('window-all-closed', () => {
     }
 });
 
+app.on('before-quit', () => {
+    console.log('[App] Cleaning up Socket.IO connections...');
+    connectedSockets.forEach(socket => {
+        socket.disconnect(true);
+    });
+    connectedSockets.clear();
+    console.log('[App] Socket.IO cleanup complete');
+});
+
 // --- WebSocket Server Logic ---
 const express = require('express');
 const http = require('http');
@@ -101,12 +111,13 @@ function startWebSocketServer() {
 
         io.on('connection', (socket) => {
             console.log('[WS] Client connected');
+            connectedSockets.add(socket);
 
-            // Send initial status?
             socket.emit('status', { message: 'Connected to ML Bridge' });
 
             socket.on('disconnect', () => {
                 console.log('[WS] Client disconnected');
+                connectedSockets.delete(socket);
             });
         });
 
