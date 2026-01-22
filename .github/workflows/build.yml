@@ -55,4 +55,4 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: |
           npm run build
-          npx electron-builder --publish always
+          npx electron-builder --publish always --publish-force
