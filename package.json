@@ -1,6 +1,6 @@
 {
     "name": "ml-bridge",
-    "version": "1.0.0",
+    "version": "1.0.3",
     "description": "Universal Machine Learning Hub for Serial Bridge",
     "main": "electron/main.js",
     "repository": {
