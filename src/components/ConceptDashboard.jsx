@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     Activity, Network, Zap, Layout, LayoutGrid,
     Terminal, Play, Square,
@@ -61,60 +61,75 @@ function FeatureRow({ label, value, active, color, onClick }) {
     )
 }
 
-function ClassCard({ cls, prediction, onTrain, onRemove, onRename, engineType, onUpload, inputSource }) {
+const ClassCard = React.memo(({ cls, prediction, onTrain, onRemove, onRename, engineType, onUpload, inputSource }) => {
     const isPredicted = prediction?.label === cls.id;
     const confidence = prediction?.confidences?.[cls.id] || 0;
     const [isRecording, setIsRecording] = useState(false);
     const intervalRef = useRef(null);
     const isUploadMode = inputSource === 'upload';
 
-    // File Input Ref
     const fileInputRef = useRef(null);
 
-    const handleFileSelect = (e) => {
+    const handleFileSelect = useCallback((e) => {
         if (e.target.files && e.target.files.length > 0 && onUpload) {
             Array.from(e.target.files).forEach(file => onUpload(cls.id, file));
         }
-    };
+    }, [onUpload, cls.id]);
 
-    // Keep ref to onTrain to avoid stale closures in setInterval
-    const onTrainRef = useRef(onTrain);
-    useEffect(() => {
-        onTrainRef.current = onTrain;
-    }, [onTrain]);
-
-    const startRecording = () => {
-        setIsRecording(true);
-        // console.log('[ClassCard] Start recording/training for:', cls.id);
-
-        // Execute immediately
-        if (onTrainRef.current) onTrainRef.current();
-
-        // Start interval using valid ref
-        intervalRef.current = setInterval(() => {
-            if (onTrainRef.current) onTrainRef.current();
-        }, 100);
-    };
-
-    const stopRecording = () => {
-        setIsRecording(false);
-        if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-
-    const [isDragOver, setIsDragOver] = useState(false);
-
-    const handleDrop = (e) => {
+    const handleDrop = useCallback((e) => {
         e.preventDefault();
         setIsDragOver(false);
         if (onUpload && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             Array.from(e.dataTransfer.files).forEach(file => onUpload(cls.id, file));
         }
-    };
+    }, [onUpload, cls.id]);
+
+    const handleRename = useCallback((e) => {
+        onRename(e.target.value);
+    }, [onRename]);
+
+    const handleRemove = useCallback((e) => {
+        e.stopPropagation();
+        onRemove();
+    }, [onRemove]);
+
+    const startRecording = useCallback(() => {
+        setIsRecording(true);
+        if (onTrain) {
+            onTrain();
+            intervalRef.current = setInterval(onTrain, 100);
+        }
+    }, [onTrain]);
+
+    const stopRecording = useCallback(() => {
+        setIsRecording(false);
+        if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+        }
+    }, []);
+
+    const [isDragOver, setIsDragOver] = useState(false);
+
+    const handleDragEnter = useCallback((e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        setIsDragOver(true);
+    }, []);
+
+    const handleDragLeave = useCallback(() => {
+        setIsDragOver(false);
+    }, []);
+
+    const handleDragOver = useCallback((e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+    }, []);
 
     return (
         <div
-            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-            onDragLeave={() => setIsDragOver(false)}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             className={`
             relative group p-4 rounded-xl border transition-all h-full flex flex-col justify-between
@@ -130,11 +145,11 @@ function ClassCard({ cls, prediction, onTrain, onRemove, onRename, engineType, o
                     <input
                         className="bg-transparent border-none text-xs font-bold text-zinc-300 focus:text-white focus:outline-none placeholder-zinc-700 uppercase tracking-wider w-full"
                         value={cls.name}
-                        onChange={(e) => onRename(e.target.value)}
+                        onChange={handleRename}
                     />
                 </div>
                 <button
-                    onClick={(e) => { e.stopPropagation(); onRemove(); }}
+                    onClick={handleRemove}
                     className="opacity-0 group-hover:opacity-100 p-1 text-zinc-600 hover:text-red-500 transition-all"
                 >
                     <Trash2 size={12} />
@@ -214,12 +229,12 @@ function ClassCard({ cls, prediction, onTrain, onRemove, onRename, engineType, o
                 </button>
             )}
         </div>
-    )
-}
+    );
+});
 
-function RegressionCard({ output, prediction, onTrain, onRemove, onUpdateTarget, onUpload, inputSource }) {
+const RegressionCard = React.memo(({ output, prediction, onTrain, onRemove, onUpdateTarget, onUpload, inputSource }) => {
     const [isRecording, setIsRecording] = useState(false);
-    const [isDragOver, setIsDragOver] = useState(false); // New: Drag & Drop State
+    const [isDragOver, setIsDragOver] = useState(false);
     const predictedValue = prediction?.regression?.[output.id];
     const hasPrediction = predictedValue !== undefined && predictedValue !== null;
     const isUploadMode = inputSource === 'upload';
@@ -227,54 +242,74 @@ function RegressionCard({ output, prediction, onTrain, onRemove, onUpdateTarget,
 
     const intervalRef = useRef(null);
 
-    // Keep refs for closure stability
-    const onTrainRef = useRef(onTrain);
-    const outputRef = useRef(output);
+    const handleUpdateTarget = useCallback((e) => {
+        onUpdateTarget(parseFloat(e.target.value));
+    }, [onUpdateTarget]);
 
-    useEffect(() => {
-        onTrainRef.current = onTrain;
-        outputRef.current = output;
+    const handleRemove = useCallback((e) => {
+        e.stopPropagation();
+        onRemove();
+    }, [onRemove]);
+
+    const startRecording = useCallback(() => {
+        setIsRecording(true);
+        if (onTrain && output) {
+            onTrain(output.id, output.value);
+            intervalRef.current = setInterval(() => {
+                if (onTrain && output) {
+                    onTrain(output.id, output.value);
+                }
+            }, 50);
+        }
     }, [onTrain, output]);
 
-    const startRecording = () => {
-        setIsRecording(true);
-        // Execute immediately
-        if (onTrainRef.current) onTrainRef.current(outputRef.current.id, outputRef.current.value);
-
-        intervalRef.current = setInterval(() => {
-            if (onTrainRef.current) {
-                onTrainRef.current(outputRef.current.id, outputRef.current.value);
-            }
-        }, 50);
-    };
-
-    const stopRecording = () => {
+    const stopRecording = useCallback(() => {
         setIsRecording(false);
         if (intervalRef.current) {
             clearInterval(intervalRef.current);
             intervalRef.current = null;
         }
-    };
+    }, []);
+
+    const handleDragEnter = useCallback((e) => {
+        if (isUploadMode) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            setIsDragOver(true);
+        }
+    }, [isUploadMode]);
+
+    const handleDragLeave = useCallback(() => {
+        setIsDragOver(false);
+    }, []);
+
+    const handleDragOver = useCallback((e) => {
+        if (isUploadMode) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+        }
+    }, [isUploadMode]);
+
+    const handleDrop = useCallback((e) => {
+        if (isUploadMode) {
+            e.preventDefault();
+            setIsDragOver(false);
+            Array.from(e.dataTransfer.files).forEach(file => onUpload(output.id, file, output.value));
+        }
+    }, [isUploadMode, onUpload, output]);
+
+    const handleFileChange = useCallback((e) => {
+        Array.from(e.target.files).forEach(file => onUpload(output.id, file, output.value));
+    }, [onUpload, output]);
 
     return (
         <div
             className={`group relative bg-[#0A0A0A] border rounded-xl p-5 transition-all
                 ${isDragOver ? 'border-emerald-500 bg-emerald-500/10 scale-[1.02] shadow-xl z-10' : 'border-zinc-800 hover:border-zinc-700'}
              `}
-            onDragOver={(e) => {
-                if (isUploadMode) {
-                    e.preventDefault();
-                    setIsDragOver(true);
-                }
-            }}
-            onDragLeave={() => setIsDragOver(false)}
-            onDrop={(e) => {
-                if (isUploadMode) {
-                    e.preventDefault();
-                    setIsDragOver(false);
-                    Array.from(e.dataTransfer.files).forEach(file => onUpload(output.id, file, output.value));
-                }
-            }}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
         >
             <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center gap-3">
@@ -290,7 +325,7 @@ function RegressionCard({ output, prediction, onTrain, onRemove, onUpdateTarget,
                         SAMPLES: <span className="text-zinc-400">{output.samples || 0}</span>
                     </div>
                     <button
-                        onClick={(e) => { e.stopPropagation(); onRemove(); }}
+                        onClick={handleRemove}
                         className="opacity-0 group-hover:opacity-100 p-1 text-zinc-600 hover:text-red-500 transition-all"
                     >
                         <Trash2 size={12} />
@@ -317,7 +352,7 @@ function RegressionCard({ output, prediction, onTrain, onRemove, onUpdateTarget,
                 <input
                     type="range" min="0" max="1" step="0.01"
                     value={output.value}
-                    onChange={(e) => onUpdateTarget(parseFloat(e.target.value))}
+                    onChange={handleUpdateTarget}
                     className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:scale-125 transition-all"
                 />
 
@@ -357,9 +392,7 @@ function RegressionCard({ output, prediction, onTrain, onRemove, onUpdateTarget,
                             className="hidden"
                             accept="image/*"
                             multiple
-                            onChange={(e) => {
-                                Array.from(e.target.files).forEach(file => onUpload(output.id, file, output.value));
-                            }}
+                            onChange={handleFileChange}
                         />
                         <button
                             onClick={() => fileInputRef.current?.click()}
@@ -388,7 +421,7 @@ function RegressionCard({ output, prediction, onTrain, onRemove, onUpdateTarget,
             </div>
         </div>
     );
-}
+});
 
 /* --- MAIN DASHBOARD CONTAINER --- */
 
