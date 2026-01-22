@@ -226,30 +226,23 @@ class MLEngine {
     async trainDenseModel(onEpochEnd, epochs = 50, learningRate = 0.001, batchSize = 16) {
         if (this.denseData.length === 0) return { success: false, error: "No data recorded." };
 
-        // Check if this is classification or regression
-        // Note: 'dense' type is used for classification with dense neural networks
         const isClassification = this.denseData[0]?.type === 'classification' || this.denseData[0]?.type === 'dense';
-
-        // Store model type for prediction
         this.denseModelType = isClassification ? 'classification' : 'regression';
 
-        // Only check for minimum classes in classification mode
         if (isClassification && this.classes.size < 2) {
             return { success: false, error: "Need at least 2 classes to train." };
         }
 
         this.isTraining = true;
 
-        // 1. Prepare Data - filter by type to ensure consistency
         const expectedType = isClassification ? ['classification', 'dense'] : ['regression'];
         const filteredData = this.denseData.filter(d => expectedType.includes(d.type));
 
         if (filteredData.length === 0) {
             this.isTraining = false;
-            return { success: false, error: `No ${isClassification ? 'classification' : 'regression'} data found. Please record samples in the correct mode.` };
+            return { success: false, error: `No ${isClassification ? 'classification' : 'regression'} data found. Please record samples in correct mode.` };
         }
 
-        // Validate minimum samples per class for robust training
         if (isClassification) {
             const classCounts = {};
             filteredData.forEach(d => {
@@ -265,13 +258,40 @@ class MLEngine {
                 return { success: false, error: `Class "${minClass}" has only ${minSamples} samples. Need at least 10 samples per class for robust gesture recognition.` };
             }
 
-            // Warn about class imbalance (but don't block training)
             if (maxSamples / minSamples > 3) {
                 console.warn(`⚠️ Class imbalance detected: max/min ratio is ${(maxSamples / minSamples).toFixed(1)}x. Consider collecting more samples for minority classes.`);
             }
         }
 
         const inputShape = filteredData[0].features.length;
+
+        for (let i = 0; i < filteredData.length; i++) {
+            const sample = filteredData[i];
+            if (!Array.isArray(sample.features)) {
+                this.isTraining = false;
+                return { success: false, error: `Sample ${i} has invalid features: expected array, got ${typeof sample.features}` };
+            }
+            if (sample.features.length !== inputShape) {
+                this.isTraining = false;
+                return { success: false, error: `Sample ${i} has ${sample.features.length} features, but expected ${inputShape}. This may happen after changing window size. Clear data and re-record.` };
+            }
+            for (let j = 0; j < sample.features.length; j++) {
+                const val = sample.features[j];
+                if (typeof val !== 'number') {
+                    this.isTraining = false;
+                    return { success: false, error: `Sample ${i} feature ${j} is not a number: ${typeof val}` };
+                }
+                if (!isFinite(val)) {
+                    this.isTraining = false;
+                    return { success: false, error: `Sample ${i} feature ${j} is not finite: ${val}` };
+                }
+                if (isNaN(val)) {
+                    this.isTraining = false;
+                    return { success: false, error: `Sample ${i} feature ${j} is NaN: ${val}` };
+                }
+            }
+        }
+
         const xs = tf.tensor2d(filteredData.map(d => d.features));
 
         let ys, outputUnits, outputActivation, lossFunction, metricsArray;
@@ -409,72 +429,60 @@ class MLEngine {
     async predictDense(inputData, features, dataType = 'auto') {
         if (!this.denseModel) return null;
 
-        const tensor = this._toTensor(inputData, features, dataType);
-        if (!tensor) return null;
+        return tf.tidy(() => {
+            const tensor = this._toTensor(inputData, features, dataType);
+            if (!tensor) return null;
 
-        // Shape [1, N]
-        const input = tensor.expandDims(0);
-        const prediction = this.denseModel.predict(input);
-        const data = await prediction.data();
+            const input = tensor.expandDims(0);
+            const prediction = this.denseModel.predict(input);
+            const data = prediction.data();
 
-        tensor.dispose();
-        input.dispose();
-        prediction.dispose();
+            if (this.denseModelType === 'regression') {
+                const regression = {};
+                const regressionOutputIds = this.regressionOutputIds;
+                if (regressionOutputIds && regressionOutputIds.length === data.length) {
+                    regressionOutputIds.forEach((id, idx) => {
+                        regression[id] = data[idx];
+                    });
+                } else {
+                    Object.assign(regression, Array.from(data));
+                }
 
-        // Handle regression mode
-        if (this.denseModelType === 'regression') {
-            // For regression, map outputs back to their IDs
-            const regression = {};
-            if (this.regressionOutputIds && this.regressionOutputIds.length === data.length) {
-                this.regressionOutputIds.forEach((id, idx) => {
-                    // Apply EMA smoothing (same as KNN regression)
-                    const alpha = 0.15; // 15% new value, 85% previous value for stability
-                    const rawValue = data[idx];
-                    const previous = this.previousRegressionValues[id] !== undefined
-                        ? this.previousRegressionValues[id]
-                        : rawValue;
+                const raw = { regression };
+                if (this.trainingConfig.confidenceThreshold) {
+                    const smoothed = this._applyPredictionSmoothing(raw, 'regression');
+                    return smoothed;
+                }
+                return raw;
 
-                    const smoothed = (alpha * rawValue) + ((1 - alpha) * previous);
-                    this.previousRegressionValues[id] = smoothed;
-                    regression[id] = smoothed;
-                });
             } else {
-                // Fallback: return as array if IDs not available
-                return {
-                    regression: Array.from(data),
-                    raw: Array.from(data)
-                };
+                const classArray = Array.from(this.classes).sort();
+                const confidences = {};
+
+                for (let i = 0; i < data.length; i++) {
+                    confidences[classArray[i]] = data[i];
+                }
+
+                const maxIdx = this._applyPredictionSmoothing({ confidences }, 'classification');
+                const rawPrediction = { label: classArray[maxIdx], confidences };
+
+                if (this.trainingConfig.confidenceThreshold) {
+                    const maxConf = Math.max(...Object.values(confidences));
+                    if (maxConf >= (this.trainingConfig.confidenceThreshold || 0.65)) {
+                        if (!this.lastPrediction || this.lastPrediction.timestamp + (this.trainingConfig.predictionCooldown || 200) < Date.now()) {
+                            this.lastPrediction = {
+                                timestamp: Date.now(),
+                                ...rawPrediction
+                            };
+                            return rawPrediction;
+                        }
+                    }
+                    return { label: null, confidences: {} };
+                }
+
+                return rawPrediction;
             }
-            return {
-                regression: regression
-            };
-        }
-
-        // Classification mode
-        const classArray = Array.from(this.classes).sort();
-
-        // Find max
-        let maxIdx = 0;
-        let maxVal = data[0];
-        const confidences = {};
-
-        for (let i = 0; i < data.length; i++) {
-            confidences[classArray[i]] = data[i];
-            if (data[i] > maxVal) {
-                maxVal = data[i];
-                maxIdx = i;
-            }
-        }
-
-        // Apply smoothing for stable predictions
-        const rawPrediction = {
-            label: classArray[maxIdx],
-            confidence: maxVal,
-            confidences: confidences,
-            timestamp: Date.now()
-        };
-
-        return this._smoothPrediction(rawPrediction, classArray);
+        });
     }
 
     // Predict on a complete gesture sequence (Tiny Trainer approach)

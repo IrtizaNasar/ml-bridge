@@ -174,52 +174,112 @@ class InputManager {
         }
     }
 
-    _looseParse(raw, out) {
-        // Try loose object (e.g. {x: 1, y: 2} with or without quotes)
-        if (raw.includes(':')) {
-            try {
-                const loose = new Function("return " + (raw.includes('{') ? raw : `{${raw}}`))();
-                Object.assign(out, loose);
-                return;
-            } catch (e) { }
+    _safeParseObject(raw) {
+        const result = {};
+        let clean = raw.trim().replace(/^\{|\}$/g, '');
+        const pairs = clean.split(',').map(p => p.trim()).filter(p => p);
+
+        for (const pair of pairs) {
+            const colonIndex = pair.indexOf(':');
+            if (colonIndex === -1) continue;
+
+            const key = pair.slice(0, colonIndex).trim();
+            const valStr = pair.slice(colonIndex + 1).trim();
+
+            if (!/^[a-zA-Z0-9_-]+$/.test(key)) continue;
+
+            const num = parseFloat(valStr);
+            if (!isNaN(num)) {
+                result[key] = num;
+            } else if (valStr === 'true') {
+                result[key] = true;
+            } else if (valStr === 'false') {
+                result[key] = false;
+            } else if (valStr === 'null') {
+                result[key] = null;
+            }
         }
 
-        // Fallback: Split by comma or space and treat as numeric channels
+        return result;
+    }
+
+    _looseParse(raw, out) {
+        if (raw.includes(':')) {
+            try {
+                const parsed = this._safeParseObject(raw);
+                if (Object.keys(parsed).length > 0) {
+                    Object.assign(out, parsed);
+                    return;
+                }
+            } catch (e) {
+                console.warn("[InputManager] Safe parse failed:", e);
+            }
+        }
+
         const parts = raw.split(/[,\s]+/).filter(p => p.trim() !== "");
         parts.forEach((part, index) => {
             if (part.includes(':')) {
                 const [key, val] = part.split(':');
-                const num = parseFloat(val);
-                if (!isNaN(num)) out[key.trim()] = num;
+                const safeKey = key.trim();
+                if (/^[a-zA-Z0-9_-]+$/.test(safeKey)) {
+                    const num = parseFloat(val);
+                    if (!isNaN(num) && isFinite(num)) {
+                        out[safeKey] = num;
+                    }
+                }
             } else {
                 const num = parseFloat(part);
-                if (!isNaN(num)) out[`ch_${index}`] = num;
+                if (!isNaN(num) && isFinite(num)) {
+                    out[`ch_${index}`] = num;
+                }
             }
         });
     }
 
+    _isValidValue(val) {
+        if (val === null || val === undefined) return false;
+        if (typeof val === 'number') {
+            return isFinite(val) && !isNaN(val);
+        }
+        if (Array.isArray(val)) {
+            return val.length > 0 && val.every(v => typeof v === 'number' && isFinite(v) && !isNaN(v));
+        }
+        return false;
+    }
+
+    _sanitizeKey(key) {
+        if (typeof key !== 'string') return String(key);
+        return key.replace(/[^a-zA-Z0-9_-]/g, '');
+    }
+
     _broadcastData(data) {
         if (data && typeof data === 'object') {
-            // Flatten numeric arrays (e.g. [940] -> 940)
-            const flattened = {};
+            const sanitized = {};
+
             Object.keys(data).forEach(k => {
                 const val = data[k];
-                if (Array.isArray(val) && val.length === 1 && typeof val[0] === 'number') {
-                    flattened[k] = val[0];
-                } else {
-                    flattened[k] = val;
+                const safeKey = this._sanitizeKey(k);
+
+                if (!safeKey) return;
+
+                if (Array.isArray(val) && val.length === 1 && this._isValidValue(val[0])) {
+                    sanitized[safeKey] = val[0];
+                    this.activeInputs.add(safeKey);
+                } else if (this._isValidValue(val)) {
+                    sanitized[safeKey] = val;
+                    this.activeInputs.add(safeKey);
                 }
-                this.activeInputs.add(k);
             });
 
-            // Notify listeners safely
-            this.dataCallbacks.forEach(cb => {
-                try {
-                    cb(flattened);
-                } catch (cbError) {
-                    console.error("[InputManager] Callback error:", cbError);
-                }
-            });
+            if (Object.keys(sanitized).length > 0) {
+                this.dataCallbacks.forEach(cb => {
+                    try {
+                        cb(sanitized);
+                    } catch (cbError) {
+                        console.error("[InputManager] Callback error:", cbError);
+                    }
+                });
+            }
         }
     }
 
@@ -244,28 +304,53 @@ class InputManager {
     // --- Image Upload Logic ---
     async convertImageToFeatures(file) {
         return new Promise((resolve, reject) => {
+            if (!file || typeof file !== 'object') {
+                reject(new Error('Invalid file object'));
+                return;
+            }
+
+            if (!file.type || !file.type.startsWith('image/')) {
+                reject(new Error('Invalid file type. Only images are allowed.'));
+                return;
+            }
+
+            const MAX_FILE_SIZE = 10 * 1024 * 1024;
+            if (file.size > MAX_FILE_SIZE) {
+                reject(new Error('File too large. Maximum size is 10MB.'));
+                return;
+            }
+
             const img = new Image();
             img.onload = () => {
-                // Resize to Match Webcam (64x64)
-                const canvas = document.createElement('canvas');
-                canvas.width = 64;
-                canvas.height = 64;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, 64, 64);
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 64;
+                    canvas.height = 64;
+                    const ctx = canvas.getContext('2d');
 
-                // Grayscale Processing
-                const imageData = ctx.getImageData(0, 0, 64, 64);
-                const data = imageData.data;
-                const features = {};
+                    if (!ctx) {
+                        reject(new Error('Failed to get canvas context'));
+                        return;
+                    }
 
-                for (let i = 0; i < data.length; i += 4) {
-                    const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-                    features[`px_${i / 4}`] = avg / 255.0; // Normalize 0-1
+                    ctx.drawImage(img, 0, 0, 64, 64);
+
+                    const imageData = ctx.getImageData(0, 0, 64, 64);
+                    const data = imageData.data;
+                    const features = {};
+
+                    for (let i = 0; i < data.length; i += 4) {
+                        const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                        const normalized = avg / 255.0;
+                        features[`px_${i / 4}`] = isFinite(normalized) ? normalized : 0;
+                    }
+
+                    resolve({ features, thumbnail: canvas.toDataURL('image/jpeg', 0.8) });
+                } catch (err) {
+                    reject(new Error(`Image processing failed: ${err.message}`));
                 }
-
-                resolve({ features, thumbnail: canvas.toDataURL() });
             };
-            img.onerror = reject;
+            img.onerror = () => reject(new Error('Failed to load image'));
             img.src = URL.createObjectURL(file);
         });
     }

@@ -148,6 +148,9 @@ class WebcamManager {
         }
 
         if (this.video) {
+            if (this.video.onloadeddata) {
+                this.video.onloadeddata = null;
+            }
             this.video.srcObject = null;
             this.video.remove();
             this.video = null;

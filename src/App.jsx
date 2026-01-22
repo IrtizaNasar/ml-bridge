@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
+import * as tf from '@tensorflow/tfjs';
 import { inputManager } from './services/InputManager';
 import { mlEngine } from './services/MLEngine';
 import { webcamManager } from './services/WebcamManager';
 
-
-// Components
+import ErrorBoundary from './components/ErrorBoundary';
 import { Sidebar } from './components/Sidebar';
 import { InputCard } from './components/InputCard';
 import { TrainingCard } from './components/TrainingCard';
@@ -16,6 +16,22 @@ import { ConceptDashboard } from './components/ConceptDashboard';
 import { ConfirmModal } from './components/ConfirmModal';
 
 function App() {
+    // Set TensorFlow backend on mount
+    useEffect(() => {
+        async function initBackend() {
+            try {
+                await tf.setBackend('webgl');
+                console.log('[App] TensorFlow.js backend: WebGL');
+            } catch (err) {
+                console.warn('[App] WebGL not available, falling back to CPU:', err);
+                await tf.setBackend('cpu');
+                console.log('[App] TensorFlow.js backend: CPU');
+            }
+        }
+
+        initBackend();
+    }, []);
+
     const [activeTab, setActiveTab] = useState('hub');
     const [isProMode, setIsProMode] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
@@ -491,14 +507,42 @@ function App() {
         });
     };
 
-    // Handle Training
-    const trainFrame = (id, targetValue = null) => {
-        if (lastError) setLastError(null); // Clear error on new action
+    const validateSensorData = (data) => {
+        if (!data || typeof data !== 'object') {
+            return { valid: false, error: 'Invalid data: not an object' };
+        }
 
-        if (lastError) setLastError(null); // Clear error on new action
+        for (const [key, value] of Object.entries(data)) {
+            if (typeof value !== 'number') {
+                return { valid: false, error: `Invalid data for "${key}": not a number (got ${typeof value})` };
+            }
+            if (!isFinite(value)) {
+                return { valid: false, error: `Invalid data for "${key}": not finite (${value})` };
+            }
+            if (isNaN(value)) {
+                return { valid: false, error: `Invalid data for "${key}": NaN` };
+            }
+            if (Math.abs(value) > 1e6) {
+                return { valid: false, error: `Invalid data for "${key}": value too large (${value})` };
+            }
+        }
+
+        return { valid: true };
+    };
+
+    const trainFrame = (id, targetValue = null) => {
+        if (lastError) setLastError(null);
+
+        if (lastError) setLastError(null);
 
         if (Object.keys(lastDataRef.current).length === 0) {
             console.warn('[App] trainFrame ignored: No incoming data in lastDataRef');
+            return;
+        }
+
+        const validation = validateSensorData(lastDataRef.current);
+        if (!validation.valid) {
+            console.warn('[App] trainFrame ignored:', validation.error);
             return;
         }
 
@@ -507,19 +551,16 @@ function App() {
 
         if (trainingMode === 'classification') {
             if (engineType === 'dense') {
-                // Use gesture mode from training config, or auto-detect
                 let dataType = 'auto';
                 if (inputSource === 'webcam' || inputSource === 'upload') {
                     dataType = 'image';
                 } else if (trainingConfig.gestureMode) {
-                    dataType = 'imu'; // Gesture mode = IMU normalization
+                    dataType = 'imu';
                 }
                 mlEngine.addDenseExample(lastDataRef.current, id, features, thumbnail, dataType);
-                // We manually track counts for dense since it's just an array
                 setClasses(prev => prev.map(c => c.id === id ? { ...c, count: c.count + 1 } : c));
             } else {
                 mlEngine.addClassificationExample(lastDataRef.current, id, features, thumbnail);
-                // Update counts from KNN classifier
                 const counts = mlEngine.getClassCounts();
                 setClasses(prev => prev.map(c => ({
                     ...c,
@@ -527,12 +568,10 @@ function App() {
                 })));
             }
         } else if (trainingMode === 'regression') {
-            // For regression, 'id' is the output ID and 'targetValue' is the float value
             if (targetValue === null) return;
 
             mlEngine.addRegressionExample(lastDataRef.current, id, targetValue, features, thumbnail);
 
-            // Update counts
             const regCounts = mlEngine.getRegressionCounts();
             setOutputs(prev => prev.map(o => ({
                 ...o,
@@ -840,7 +879,8 @@ function App() {
 
     return (
         <div className="h-screen w-screen overflow-hidden bg-[#050505]">
-            <ConceptDashboard
+            <ErrorBoundary>
+                <ConceptDashboard
                 classes={classes}
                 setClasses={setClasses}
                 outputs={outputs}
@@ -887,7 +927,8 @@ function App() {
                 setTargetDeviceId={setTargetDeviceId}
                 serialFormat={serialFormat}
                 setSerialFormat={setSerialFormat}
-            />
+                />
+            </ErrorBoundary>
 
             {/* Source Change Confirmation Modal */}
             <ConfirmModal
