@@ -101,13 +101,20 @@ if (!Object.entries) {
 /**
  * Polyfill for Object.values (IE11 support)
  */
-if (!Object.values) {
-    console.log('[Polyfill] Object.values activated');
+// Safe Object.values wrapper
+(function () {
+    const originalValues = Object.values;
     Object.values = function (obj) {
-        if (obj === null || obj === undefined) return [];
+        if (obj === null || obj === undefined) {
+            console.warn('[Polyfill] Prevented Object.values crash on null/undefined');
+            return [];
+        }
+        if (originalValues) {
+            return originalValues(obj);
+        }
         return Object.keys(obj).map(key => obj[key]);
     };
-}
+})();
 
 /**
  * Polyfill for Array.from (IE11 support)
