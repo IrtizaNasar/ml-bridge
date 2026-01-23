@@ -12,7 +12,7 @@ import { validateClassName, sanitizeInput } from './utils';
 import { Sidebar } from './components/Sidebar';
 import { InputCard } from './components/InputCard';
 import { TrainingCard } from './components/TrainingCard';
-import { DataCard } from './components/DataCard';
+// DataCard import removed (unused)
 import { HubView } from './components/HubView';
 
 import { SettingsModal } from './components/SettingsModal';
