@@ -386,13 +386,29 @@ function App() {
             }
 
             // Auto-populate features if empty (Startup or Source Switch)
-            if (Object.keys(data).length > 0 && selectedFeaturesRef.current.size === 0) {
+            // OR update to remove inactive sensors (real-time feature detection)
+            if (Object.keys(data).length > 0) {
                 const numericKeys = Object.keys(data).filter(k => typeof data[k] === 'number');
-                // For MobileNet (f0..f1023), select all. For Serial, select all numbers.
+
                 if (numericKeys.length > 0) {
-                    const newSet = new Set(numericKeys);
-                    setSelectedFeatures(newSet);
-                    selectedFeaturesRef.current = newSet;
+                    // If no features selected yet, select all
+                    if (selectedFeaturesRef.current.size === 0) {
+                        const newSet = new Set(numericKeys);
+                        setSelectedFeatures(newSet);
+                        selectedFeaturesRef.current = newSet;
+                    } else {
+                        // Update existing selection: remove inactive sensors, keep active ones
+                        const currentFeatures = Array.from(selectedFeaturesRef.current);
+                        const activeFeatures = currentFeatures.filter(f => numericKeys.includes(f));
+
+                        // Only update if features changed (sensor stopped streaming)
+                        if (activeFeatures.length !== currentFeatures.length) {
+                            const updatedSet = new Set(activeFeatures);
+                            setSelectedFeatures(updatedSet);
+                            selectedFeaturesRef.current = updatedSet;
+                            console.log(`[App] Updated features: removed ${currentFeatures.length - activeFeatures.length} inactive sensor(s)`);
+                        }
+                    }
                 }
             }
 
