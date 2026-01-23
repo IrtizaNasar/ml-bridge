@@ -102,7 +102,9 @@ if (!Object.entries) {
  * Polyfill for Object.values (IE11 support)
  */
 if (!Object.values) {
+    console.log('[Polyfill] Object.values activated');
     Object.values = function (obj) {
+        if (obj === null || obj === undefined) return [];
         return Object.keys(obj).map(key => obj[key]);
     };
 }
