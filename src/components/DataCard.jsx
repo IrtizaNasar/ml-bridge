@@ -60,8 +60,8 @@ export function DataCard({ onSave, onLoad, onClear }) {
     };
 
     // Calculate totals
-    const totalClassSamples = Object.values(counts.classification).reduce((a, b) => a + b, 0);
-    const totalRegressionSamples = Object.values(counts.regression).reduce((a, b) => a + b, 0);
+    const totalClassSamples = Object.values(counts?.classification || {}).reduce((a, b) => a + b, 0);
+    const totalRegressionSamples = Object.values(counts?.regression || {}).reduce((a, b) => a + b, 0);
 
     return (
         <div className="h-full flex flex-col p-8 max-w-4xl mx-auto w-full animate-in fade-in slide-in-from-bottom-4">
@@ -104,7 +104,7 @@ export function DataCard({ onSave, onLoad, onClear }) {
                             <span className="font-mono font-bold text-xl">{totalClassSamples}</span>
                         </div>
                         <div className="pl-4 space-y-2">
-                            {Object.entries(counts.classification).map(([id, count]) => (
+                            {Object.entries(counts?.classification || {}).map(([id, count]) => (
                                 <div key={id} className="flex justify-between text-xs text-white/40 font-mono">
                                     <span>{id}</span>
                                     <span>{count}</span>
