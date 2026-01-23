@@ -77,6 +77,10 @@ function App() {
     const [selectedFeatures, setSelectedFeatures] = useState(new Set());
     const [dataRefreshKey, setDataRefreshKey] = useState(0); // Trigger for DataView refresh
 
+    // Feature update tracking (for debouncing real-time detection)
+    const lastSeenFeaturesRef = useRef(new Map()); // Map<featureName, lastSeenTimestamp>
+    const featureUpdateTimerRef = useRef(null);
+
     // Deploy/Output Protocol Configuration
     const [protocol, setProtocol] = useState('osc'); // 'osc' | 'ws' | 'serial'
     const [targetDeviceId, setTargetDeviceId] = useState(''); // For Serial Bridge routing
@@ -161,6 +165,14 @@ function App() {
         setIncomingData({});
         setSelectedFeatures(new Set());
         selectedFeaturesRef.current = new Set();
+
+        // Clear feature tracking
+        lastSeenFeaturesRef.current.clear();
+        if (featureUpdateTimerRef.current) {
+            clearTimeout(featureUpdateTimerRef.current);
+            featureUpdateTimerRef.current = null;
+        }
+
         setPrediction(null);
         setTrainingProgress(null);
         setIsRunning(false);
@@ -385,32 +397,52 @@ function App() {
                 handleAutoCapture(data);
             }
 
+            // Track currently streaming features (for real-time detection)
+            const now = Date.now();
+            const numericKeys = Object.keys(data).filter(k => typeof data[k] === 'number');
+
+            // Update last seen timestamp for each active feature
+            numericKeys.forEach(key => {
+                lastSeenFeaturesRef.current.set(key, now);
+            });
+
             // Auto-populate features if empty (Startup or Source Switch)
-            // OR update to remove inactive sensors (real-time feature detection)
-            if (Object.keys(data).length > 0) {
-                const numericKeys = Object.keys(data).filter(k => typeof data[k] === 'number');
-
+            if (Object.keys(data).length > 0 && selectedFeaturesRef.current.size === 0) {
                 if (numericKeys.length > 0) {
-                    // If no features selected yet, select all
-                    if (selectedFeaturesRef.current.size === 0) {
-                        const newSet = new Set(numericKeys);
-                        setSelectedFeatures(newSet);
-                        selectedFeaturesRef.current = newSet;
-                    } else {
-                        // Update existing selection: remove inactive sensors, keep active ones
-                        const currentFeatures = Array.from(selectedFeaturesRef.current);
-                        const activeFeatures = currentFeatures.filter(f => numericKeys.includes(f));
-
-                        // Only update if features changed (sensor stopped streaming)
-                        if (activeFeatures.length !== currentFeatures.length) {
-                            const updatedSet = new Set(activeFeatures);
-                            setSelectedFeatures(updatedSet);
-                            selectedFeaturesRef.current = updatedSet;
-                            console.log(`[App] Updated features: removed ${currentFeatures.length - activeFeatures.length} inactive sensor(s)`);
-                        }
-                    }
+                    const newSet = new Set(numericKeys);
+                    setSelectedFeatures(newSet);
+                    selectedFeaturesRef.current = newSet;
                 }
             }
+
+            // Debounced feature cleanup: Remove inactive sensors after grace period
+            // Only check every 2 seconds to avoid excessive updates
+            if (featureUpdateTimerRef.current) {
+                clearTimeout(featureUpdateTimerRef.current);
+            }
+
+            featureUpdateTimerRef.current = setTimeout(() => {
+                if (selectedFeaturesRef.current.size > 0) {
+                    const GRACE_PERIOD_MS = 2000; // 2 seconds grace period
+                    const currentFeatures = Array.from(selectedFeaturesRef.current);
+
+                    // Only keep features seen within grace period
+                    const activeFeatures = currentFeatures.filter(f => {
+                        const lastSeen = lastSeenFeaturesRef.current.get(f);
+                        return lastSeen && (now - lastSeen < GRACE_PERIOD_MS);
+                    });
+
+                    // Only update if features actually changed
+                    if (activeFeatures.length !== currentFeatures.length && activeFeatures.length > 0) {
+                        const updatedSet = new Set(activeFeatures);
+                        setSelectedFeatures(updatedSet);
+                        selectedFeaturesRef.current = updatedSet;
+
+                        const removed = currentFeatures.filter(f => !activeFeatures.includes(f));
+                        console.log(`[App] Updated features: removed inactive sensors [${removed.join(', ')}]`);
+                    }
+                }
+            }, 2000); // Check every 2 seconds
 
             // Predict (Only if Running)
             if (!isRunningRef.current) {
@@ -512,7 +544,13 @@ function App() {
         });
 
 
-        return () => inputManager.disconnect();
+        return () => {
+            inputManager.disconnect();
+            // Cleanup feature update timer
+            if (featureUpdateTimerRef.current) {
+                clearTimeout(featureUpdateTimerRef.current);
+            }
+        };
     }, []); // Stable listener, no re-binding needed
 
     const toggleFeature = (key) => {
