@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Database, Filter, Download, Upload, Trash2, Search, Table, RefreshCw } from 'lucide-react';
 import { FixedSizeList as List } from 'react-window';
 import { mlEngine } from '../services/MLEngine';
+import { UI_CONSTANTS } from '../constants';
 
 export function DataView({ onLoad, onSave, onDeleteSample }) {
     const [samples, setSamples] = useState([]);
@@ -201,9 +202,9 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
                 {/* Virtual Scrolling List */}
                 {filteredSamples.length > 0 ? (
                     <List
-                        height={window.innerHeight - 350} // Adjust based on header/toolbar height
+                        height={window.innerHeight - UI_CONSTANTS.DATAVIEW_HEADER_HEIGHT}
                         itemCount={filteredSamples.length}
-                        itemSize={88} // Row height in pixels
+                        itemSize={UI_CONSTANTS.VIRTUAL_SCROLL_ROW_HEIGHT}
                         width="100%"
                         className="scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent"
                     >

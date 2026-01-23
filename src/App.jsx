@@ -3,6 +3,7 @@ import * as tf from '@tensorflow/tfjs';
 import { inputManager } from './services/InputManager';
 import { mlEngine } from './services/MLEngine';
 import { webcamManager } from './services/WebcamManager';
+import { FEATURE_DETECTION } from './constants';
 
 
 // Components
@@ -423,13 +424,12 @@ function App() {
 
             featureUpdateTimerRef.current = setTimeout(() => {
                 if (selectedFeaturesRef.current.size > 0) {
-                    const GRACE_PERIOD_MS = 2000; // 2 seconds grace period
                     const currentFeatures = Array.from(selectedFeaturesRef.current);
 
                     // Only keep features seen within grace period
                     const activeFeatures = currentFeatures.filter(f => {
                         const lastSeen = lastSeenFeaturesRef.current.get(f);
-                        return lastSeen && (now - lastSeen < GRACE_PERIOD_MS);
+                        return lastSeen && (now - lastSeen < FEATURE_DETECTION.GRACE_PERIOD_MS);
                     });
 
                     // Only update if features actually changed
@@ -442,7 +442,7 @@ function App() {
                         console.log(`[App] Updated features: removed inactive sensors [${removed.join(', ')}]`);
                     }
                 }
-            }, 2000); // Check every 2 seconds
+            }, FEATURE_DETECTION.UPDATE_CHECK_INTERVAL_MS);
 
             // Predict (Only if Running)
             if (!isRunningRef.current) {
