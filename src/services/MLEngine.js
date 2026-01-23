@@ -83,8 +83,7 @@ class MLEngine {
                 result.confidence = 0;
             }
 
-            // debug info available if needed
-            // console.log('[MLEngine] KNN Prediction:', { label: result.label, confidence: result.confidence });
+
 
             tensor.dispose();
             return result;
@@ -227,7 +226,7 @@ class MLEngine {
         if (this.denseData.length === 0) return { success: false, error: "No data recorded." };
 
         // Check if this is classification or regression
-        // Note: 'dense' type is used for classification with dense neural networks
+        // Dense type indicates classification using neural networks
         const isClassification = this.denseData[0]?.type === 'classification' || this.denseData[0]?.type === 'dense';
 
         // Store model type for prediction
@@ -545,7 +544,7 @@ return this._trainModel(xs, ys, outputUnits, outputActivation, lossFunction, met
     }
 
     // Apply smoothing with bypassed cooldown for gesture predictions
-    // Since gestures are infrequent, we don't need cooldown between them
+    // Gestures are infrequent events, no cooldown needed
     const rawPrediction = {
         label: classArray[maxIdx],
         confidence: maxVal,
@@ -710,21 +709,21 @@ _detectDataType(inputData, keys) {
 _normalizeValue(value, dataType) {
     switch (dataType) {
         case 'image':
-            // Images are already normalized 0-1, just clamp
+            // Images are normalized to [0, 1] range
             return Math.max(0, Math.min(1, value));
 
         case 'imu':
             // IMU sensor data (accelerometer/gyroscope): normalize to [-1, 1]
             // Check if already normalized first (Serial Bridge often sends pre-normalized data)
             if (Math.abs(value) <= 1.2) {
-                // Already normalized, just clamp to safe range [-1, 1]
+                // Normalized to [-1, 1] range
                 return Math.max(-1, Math.min(1, value));
             }
             // Otherwise, normalize from typical raw IMU range: -4 to +4
             return Math.max(-1, Math.min(1, value / 4.0));
 
         case 'eeg':
-            // EEG data: normalize based on typical range (adjust as needed)
+            // EEG data normalized to typical microvolts range
             // Typical EEG range: -200 to +200 microvolts, but can vary
             // Use adaptive normalization: divide by max observed or use fixed scale
             return Math.max(-1, Math.min(1, value / 200.0));
@@ -737,7 +736,7 @@ _normalizeValue(value, dataType) {
                 return value; // Already normalized
             }
             // Otherwise, apply conservative normalization
-            // Assume values might be in [-10, 10] range
+            // Sensor data normalized to [-10, 10] range
             return Math.max(-1, Math.min(1, value / 10.0));
     }
 }
@@ -1157,7 +1156,7 @@ importData(data) {
         zip.file('model/metadata.json', JSON.stringify(metadata, null, 2));
 
         // 4. Bundle MobileNet (Vision Model) to ensure 100% Parity
-        // We fetch the EXACT files used by the app from the public folder
+        // Fetch MobileNet files from public folder for bundling
         try {
             const mobilenetFiles = [
                 'model.json',
@@ -1176,7 +1175,7 @@ importData(data) {
             console.log("[Web Export] Bundled MobileNet successfully.");
         } catch (e) {
             console.error("[Web Export] Failed to bundle MobileNet:", e);
-            // We don't block export, but user will need to copy manually if this fails
+            // Export continues even if MobileNet bundling fails
         }
 
         console.log("[Web Export] Created metadata.json with labels:", classesAList);

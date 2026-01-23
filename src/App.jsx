@@ -450,9 +450,8 @@ function App() {
                 return;
             }
 
-            // Skip continuous prediction if gesture prediction mode is active FOR IMU DATA
-            // Webcam/image data should still predict continuously
-            // Gesture prediction works independently - doesn't require auto-capture
+            // Skip continuous prediction for gesture mode (IMU data only)
+            // Webcam and image data continue predicting every frame
             const isGestureInput = inputSourceRef.current !== 'webcam' && inputSourceRef.current !== 'upload';
             if (trainingConfigRef.current.gesturePredictionMode && isGestureInput) {
                 return; // Don't predict on every frame for IMU - only on gesture completion
@@ -586,7 +585,7 @@ function App() {
                     dataType = 'imu'; // Gesture mode = IMU normalization
                 }
                 mlEngine.addDenseExample(lastDataRef.current, id, features, thumbnail, dataType);
-                // We manually track counts for dense since it's just an array
+                // Track counts manually for dense data (array-based storage)
                 setClasses(prev => prev.map(c => c.id === id ? { ...c, count: c.count + 1 } : c));
             } else {
                 mlEngine.addClassificationExample(lastDataRef.current, id, features, thumbnail);
@@ -891,7 +890,7 @@ function App() {
                         const classCounts = mlEngine.getClassCounts();
                         const regCounts = mlEngine.getRegressionCounts();
 
-                        // Rebuild classes from dataset (don't just update existing)
+                        // Rebuild classes from loaded dataset
                         const loadedClassIds = Object.keys(classCounts);
                         const newClasses = loadedClassIds.map(classId => {
                             // Check if class already exists in UI state

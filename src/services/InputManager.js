@@ -15,7 +15,7 @@ class InputManager {
     }
 
     setSource(source) {
-        // console.log(`[InputManager] Switching/Refreshing source to: ${source}`);
+
 
         // Teardown previous
         if (this.currentSource === 'serial') this.disconnectSocket();
@@ -43,7 +43,7 @@ class InputManager {
             return;
         }
 
-        // console.log(`[InputManager] Connecting to Serial Bridge at ${this.serialBridgeUrl}...`);
+
         this.socket = io(this.serialBridgeUrl, {
             reconnection: true,
             reconnectionAttempts: Infinity, // Keep trying
@@ -52,7 +52,7 @@ class InputManager {
         });
 
         this.socket.on("connect", () => {
-            // console.log("[InputManager] Socket Connected!");
+
             this.isConnected = true;
             this._notifyStatus({ connected: true, source: 'Serial Bridge' });
         });
@@ -63,14 +63,14 @@ class InputManager {
         });
 
         this.socket.on("disconnect", (reason) => {
-            // console.log("[InputManager] Socket Disconnected:", reason);
+
             this.isConnected = false;
             this._notifyStatus({ connected: false, source: 'Serial Bridge (Disconnected)' });
         });
 
         this.socket.on("serial-data", (payload) => {
             if (!payload || !payload.data) return;
-            // console.log("[InputManager] Data Arrival:", payload.data);
+
             this._processData(payload.data);
         });
     }
@@ -199,7 +199,7 @@ class InputManager {
                     }
                 });
 
-                // If we successfully parsed any values, return
+                // Return if any values were successfully parsed
                 if (Object.keys(out).length > 0) {
                     return;
                 }

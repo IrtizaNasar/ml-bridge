@@ -85,7 +85,7 @@ function ClassCard({ cls, prediction, onTrain, onRemove, onRename, engineType, o
 
     const startRecording = () => {
         setIsRecording(true);
-        // console.log('[ClassCard] Start recording/training for:', cls.id);
+
 
         // Execute immediately
         if (onTrainRef.current) onTrainRef.current();
