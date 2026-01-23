@@ -270,688 +270,779 @@ class MLEngine {
                 console.warn(`⚠️ Class imbalance detected: max/min ratio is ${(maxSamples / minSamples).toFixed(1)}x. Consider collecting more samples for minority classes.`);
             }
         }
+    }
 
-        const inputShape = filteredData[0].features.length;
-        const xs = tf.tensor2d(filteredData.map(d => d.features));
+    // ADDED: Validate all samples have consistent feature dimensions
+    const firstShape = filteredData[0].features.length;
+    const shapeMismatch = filteredData.find(d => d.features.length !== firstShape);
+
+    if(shapeMismatch) {
+        this.isTraining = false;
+        return {
+            success: false,
+            error: `Inconsistent feature dimensions detected: expected ${firstShape} features, but found ${shapeMismatch.features.length}. This usually happens after changing the temporal window size. Please clear all data and re-record samples with the current settings.`
+        };
+    }
+
+    const inputShape = filteredData[0].features.length;
+    const xs = tf.tensor2d(filteredData.map(d => d.features));
 
         let ys, outputUnits, outputActivation, lossFunction, metricsArray;
 
-        if (isClassification) {
-            // Classification mode
-            const classArray = Array.from(this.classes).sort();
-            const numClasses = classArray.length;
+if (isClassification) {
+    // Classification mode
+    const classArray = Array.from(this.classes).sort();
+    const numClasses = classArray.length;
 
-            // One-hot encode labels
-            ys = tf.tidy(() => {
-                const labelIndices = filteredData.map(d => classArray.indexOf(d.label));
-                return tf.oneHot(tf.tensor1d(labelIndices, 'int32'), numClasses);
-            });
+    // One-hot encode labels
+    ys = tf.tidy(() => {
+        const labelIndices = filteredData.map(d => classArray.indexOf(d.label));
+        return tf.oneHot(tf.tensor1d(labelIndices, 'int32'), numClasses);
+    });
 
-            outputUnits = numClasses;
-            outputActivation = 'softmax';
-            lossFunction = 'categoricalCrossentropy';
-            metricsArray = ['accuracy'];
-        } else {
-            // Regression mode - support multi-output
-            // Group samples by timestamp to collect all output targets for each sample
-            const samplesByTimestamp = {};
-            const outputIds = new Set();
+    outputUnits = numClasses;
+    outputActivation = 'softmax';
+    lossFunction = 'categoricalCrossentropy';
+    metricsArray = ['accuracy'];
+} else {
+    // Regression mode - support multi-output
+    // Group samples by timestamp to collect all output targets for each sample
+    const samplesByTimestamp = {};
+    const outputIds = new Set();
 
-            filteredData.forEach(d => {
-                const ts = d.timestamp;
-                if (!samplesByTimestamp[ts]) {
-                    samplesByTimestamp[ts] = {
-                        features: d.features,
-                        targets: {}
-                    };
-                }
-                // d.label is the outputId (e.g., "param1")
-                samplesByTimestamp[ts].targets[d.label] = parseFloat(d.target);
-                outputIds.add(d.label);
-            });
-
-            // Convert to arrays
-            const sortedOutputIds = Array.from(outputIds).sort();
-            // Store output IDs for prediction mapping
-            this.regressionOutputIds = sortedOutputIds;
-            const samples = Object.values(samplesByTimestamp);
-
-            // Build feature and target tensors
-            const features = samples.map(s => s.features);
-            const targets = samples.map(s => {
-                // Create target vector with all outputs in consistent order
-                return sortedOutputIds.map(id => s.targets[id] || 0);
-            });
-
-            // Update xs with grouped features
-            xs.dispose();
-            const xsGrouped = tf.tensor2d(features);
-
-            ys = tf.tensor2d(targets);
-            outputUnits = sortedOutputIds.length;
-            outputActivation = 'linear';
-            lossFunction = 'meanSquaredError';
-            metricsArray = ['mse'];
-
-            // Use grouped features
-            return this._trainModel(xsGrouped, ys, outputUnits, outputActivation, lossFunction, metricsArray, inputShape, onEpochEnd, epochs, learningRate, batchSize);
+    filteredData.forEach(d => {
+        const ts = d.timestamp;
+        if (!samplesByTimestamp[ts]) {
+            samplesByTimestamp[ts] = {
+                features: d.features,
+                targets: {}
+            };
         }
+        // d.label is the outputId (e.g., "param1")
+        samplesByTimestamp[ts].targets[d.label] = parseFloat(d.target);
+        outputIds.add(d.label);
+    });
 
-        // Continue with classification training
-        return this._trainModel(xs, ys, outputUnits, outputActivation, lossFunction, metricsArray, inputShape, onEpochEnd, epochs, learningRate, batchSize);
+    // Convert to arrays
+    const sortedOutputIds = Array.from(outputIds).sort();
+    // Store output IDs for prediction mapping
+    this.regressionOutputIds = sortedOutputIds;
+    const samples = Object.values(samplesByTimestamp);
+
+    // Build feature and target tensors
+    const features = samples.map(s => s.features);
+    const targets = samples.map(s => {
+        // Create target vector with all outputs in consistent order
+        return sortedOutputIds.map(id => s.targets[id] || 0);
+    });
+
+    // Update xs with grouped features
+    xs.dispose();
+    const xsGrouped = tf.tensor2d(features);
+
+    ys = tf.tensor2d(targets);
+    outputUnits = sortedOutputIds.length;
+    outputActivation = 'linear';
+    lossFunction = 'meanSquaredError';
+    metricsArray = ['mse'];
+
+    // Use grouped features
+    return this._trainModel(xsGrouped, ys, outputUnits, outputActivation, lossFunction, metricsArray, inputShape, onEpochEnd, epochs, learningRate, batchSize);
+}
+
+// Continue with classification training
+return this._trainModel(xs, ys, outputUnits, outputActivation, lossFunction, metricsArray, inputShape, onEpochEnd, epochs, learningRate, batchSize);
     }
 
     async _trainModel(xs, ys, outputUnits, outputActivation, lossFunction, metricsArray, inputShape, onEpochEnd, epochs = 50, learningRate = 0.001, batchSize = 16) {
 
-        // 2. Create Model
-        const model = tf.sequential();
+    // 2. Create Model
+    const model = tf.sequential();
 
-        // Hidden Layer 1 - Standard architecture for gesture recognition
-        // This architecture is proven for gesture recognition
-        model.add(tf.layers.dense({
-            units: 50,
-            activation: 'relu',
-            inputShape: [inputShape],
-            kernelInitializer: 'heNormal'
-        }));
+    // Hidden Layer 1 - Standard architecture for gesture recognition
+    // This architecture is proven for gesture recognition
+    model.add(tf.layers.dense({
+        units: 50,
+        activation: 'relu',
+        inputShape: [inputShape],
+        kernelInitializer: 'heNormal'
+    }));
 
-        // Dropout for regularization
-        model.add(tf.layers.dropout({
-            rate: 0.2
-        }));
+    // Dropout for regularization
+    model.add(tf.layers.dropout({
+        rate: 0.2
+    }));
 
-        // Hidden Layer 2 - Match Tiny Motion Trainer architecture (15 units)
-        model.add(tf.layers.dense({
-            units: 15,
-            activation: 'relu',
-            kernelInitializer: 'heNormal'
-        }));
+    // Hidden Layer 2 - Match Tiny Motion Trainer architecture (15 units)
+    model.add(tf.layers.dense({
+        units: 15,
+        activation: 'relu',
+        kernelInitializer: 'heNormal'
+    }));
 
-        // Output Layer
-        model.add(tf.layers.dense({
-            units: outputUnits,
-            activation: outputActivation
-        }));
+    // Output Layer
+    model.add(tf.layers.dense({
+        units: outputUnits,
+        activation: outputActivation
+    }));
 
-        model.compile({
-            optimizer: tf.train.adam(learningRate),
-            loss: lossFunction,
-            metrics: metricsArray
-        });
+    model.compile({
+        optimizer: tf.train.adam(learningRate),
+        loss: lossFunction,
+        metrics: metricsArray
+    });
 
-        this.denseModel = model;
+    this.denseModel = model;
 
-        // 3. Train
-        try {
-            await model.fit(xs, ys, {
-                epochs: epochs,
-                batchSize: batchSize,
-                shuffle: true,
-                callbacks: {
-                    onEpochEnd: (epoch, logs) => {
-                        // Pass model type to callback so it can extract correct metrics
-                        if (onEpochEnd) onEpochEnd(epoch, logs, this.denseModelType);
-                        if (!this.isTraining) model.stopTraining = true;
-                    }
+    // 3. Train
+    try {
+        await model.fit(xs, ys, {
+            epochs: epochs,
+            batchSize: batchSize,
+            shuffle: true,
+            callbacks: {
+                onEpochEnd: (epoch, logs) => {
+                    // Pass model type to callback so it can extract correct metrics
+                    if (onEpochEnd) onEpochEnd(epoch, logs, this.denseModelType);
+                    if (!this.isTraining) model.stopTraining = true;
                 }
-            });
-        } catch (e) {
-            console.error("Training Interrupted:", e);
-        }
-
-        xs.dispose();
-        ys.dispose();
-        this.isTraining = false;
-
-        return { success: true, model: this.denseModel };
+            }
+        });
+    } catch (e) {
+        console.error("Training Interrupted:", e);
     }
+
+    xs.dispose();
+    ys.dispose();
+    this.isTraining = false;
+
+    return { success: true, model: this.denseModel };
+}
 
     async predictDense(inputData, features, dataType = 'auto') {
-        if (!this.denseModel) return null;
+    if (!this.denseModel) return null;
 
-        const tensor = this._toTensor(inputData, features, dataType);
-        if (!tensor) return null;
+    const tensor = this._toTensor(inputData, features, dataType);
+    if (!tensor) return null;
 
-        // Shape [1, N]
-        const input = tensor.expandDims(0);
-        const prediction = this.denseModel.predict(input);
-        const data = await prediction.data();
+    // Shape [1, N]
+    const input = tensor.expandDims(0);
+    const prediction = this.denseModel.predict(input);
+    const data = await prediction.data();
 
-        tensor.dispose();
-        input.dispose();
-        prediction.dispose();
+    tensor.dispose();
+    input.dispose();
+    prediction.dispose();
 
-        // Handle regression mode
-        if (this.denseModelType === 'regression') {
-            // For regression, map outputs back to their IDs
-            const regression = {};
-            if (this.regressionOutputIds && this.regressionOutputIds.length === data.length) {
-                this.regressionOutputIds.forEach((id, idx) => {
-                    // Apply EMA smoothing (same as KNN regression)
-                    const alpha = 0.15; // 15% new value, 85% previous value for stability
-                    const rawValue = data[idx];
-                    const previous = this.previousRegressionValues[id] !== undefined
-                        ? this.previousRegressionValues[id]
-                        : rawValue;
+    // Handle regression mode
+    if (this.denseModelType === 'regression') {
+        // For regression, map outputs back to their IDs
+        const regression = {};
+        if (this.regressionOutputIds && this.regressionOutputIds.length === data.length) {
+            this.regressionOutputIds.forEach((id, idx) => {
+                // Apply EMA smoothing (same as KNN regression)
+                const alpha = 0.15; // 15% new value, 85% previous value for stability
+                const rawValue = data[idx];
+                const previous = this.previousRegressionValues[id] !== undefined
+                    ? this.previousRegressionValues[id]
+                    : rawValue;
 
-                    const smoothed = (alpha * rawValue) + ((1 - alpha) * previous);
-                    this.previousRegressionValues[id] = smoothed;
-                    regression[id] = smoothed;
-                });
-            } else {
-                // Fallback: return as array if IDs not available
-                return {
-                    regression: Array.from(data),
-                    raw: Array.from(data)
-                };
-            }
+                const smoothed = (alpha * rawValue) + ((1 - alpha) * previous);
+                this.previousRegressionValues[id] = smoothed;
+                regression[id] = smoothed;
+            });
+        } else {
+            // Fallback: return as array if IDs not available
             return {
-                regression: regression
+                regression: Array.from(data),
+                raw: Array.from(data)
             };
         }
-
-        // Classification mode
-        const classArray = Array.from(this.classes).sort();
-
-        // Find max
-        let maxIdx = 0;
-        let maxVal = data[0];
-        const confidences = {};
-
-        for (let i = 0; i < data.length; i++) {
-            confidences[classArray[i]] = data[i];
-            if (data[i] > maxVal) {
-                maxVal = data[i];
-                maxIdx = i;
-            }
-        }
-
-        // Apply smoothing for stable predictions
-        const rawPrediction = {
-            label: classArray[maxIdx],
-            confidence: maxVal,
-            confidences: confidences,
-            timestamp: Date.now()
+        return {
+            regression: regression
         };
-
-        return this._smoothPrediction(rawPrediction, classArray);
     }
+
+    // Classification mode
+    const classArray = Array.from(this.classes).sort();
+
+    // Find max
+    let maxIdx = 0;
+    let maxVal = data[0];
+    const confidences = {};
+
+    for (let i = 0; i < data.length; i++) {
+        confidences[classArray[i]] = data[i];
+        if (data[i] > maxVal) {
+            maxVal = data[i];
+            maxIdx = i;
+        }
+    }
+
+    // Apply smoothing for stable predictions
+    const rawPrediction = {
+        label: classArray[maxIdx],
+        confidence: maxVal,
+        confidences: confidences,
+        timestamp: Date.now()
+    };
+
+    return this._smoothPrediction(rawPrediction, classArray);
+}
 
     // Predict on a complete gesture sequence (Tiny Trainer approach)
     async predictDenseGesture(gestureSequence, features, dataType = 'auto') {
-        if (!this.denseModel) return null;
-        if (!gestureSequence || gestureSequence.length === 0) return null;
+    if (!this.denseModel) return null;
+    if (!gestureSequence || gestureSequence.length === 0) return null;
 
-        // Flatten and normalize the gesture sequence
-        const featureVector = this._normalizeSequence(gestureSequence, features, dataType);
-        if (!featureVector) return null;
+    // Flatten and normalize the gesture sequence
+    const featureVector = this._normalizeSequence(gestureSequence, features, dataType);
+    if (!featureVector) return null;
 
-        // Create tensor and predict
-        const tensor = tf.tensor1d(featureVector);
-        const input = tensor.expandDims(0);
-        const prediction = this.denseModel.predict(input);
-        const data = await prediction.data();
+    // Create tensor and predict
+    const tensor = tf.tensor1d(featureVector);
+    const input = tensor.expandDims(0);
+    const prediction = this.denseModel.predict(input);
+    const data = await prediction.data();
 
-        // Cleanup
-        tensor.dispose();
-        input.dispose();
-        prediction.dispose();
+    // Cleanup
+    tensor.dispose();
+    input.dispose();
+    prediction.dispose();
 
-        // Handle regression mode
-        if (this.denseModelType === 'regression') {
-            const regression = {};
-            if (this.regressionOutputIds && this.regressionOutputIds.length === data.length) {
-                this.regressionOutputIds.forEach((id, idx) => {
-                    regression[id] = data[idx];
-                });
-            } else {
-                return {
-                    regression: Array.from(data),
-                    raw: Array.from(data)
-                };
-            }
+    // Handle regression mode
+    if (this.denseModelType === 'regression') {
+        const regression = {};
+        if (this.regressionOutputIds && this.regressionOutputIds.length === data.length) {
+            this.regressionOutputIds.forEach((id, idx) => {
+                regression[id] = data[idx];
+            });
+        } else {
             return {
-                regression: regression
+                regression: Array.from(data),
+                raw: Array.from(data)
             };
         }
-
-        // Classification mode
-        const classArray = Array.from(this.classes).sort();
-
-        // Find max
-        let maxIdx = 0;
-        let maxVal = data[0];
-        const confidences = {};
-
-        for (let i = 0; i < data.length; i++) {
-            confidences[classArray[i]] = data[i];
-            if (data[i] > maxVal) {
-                maxVal = data[i];
-                maxIdx = i;
-            }
-        }
-
-        // Apply smoothing with bypassed cooldown for gesture predictions
-        // Since gestures are infrequent, we don't need cooldown between them
-        const rawPrediction = {
-            label: classArray[maxIdx],
-            confidence: maxVal,
-            confidences: confidences,
-            timestamp: Date.now()
+        return {
+            regression: regression
         };
-
-        return this._smoothPrediction(rawPrediction, classArray, true); // bypassCooldown = true
     }
 
-    stopTraining() {
-        this.isTraining = false;
+    // Classification mode
+    const classArray = Array.from(this.classes).sort();
+
+    // Find max
+    let maxIdx = 0;
+    let maxVal = data[0];
+    const confidences = {};
+
+    for (let i = 0; i < data.length; i++) {
+        confidences[classArray[i]] = data[i];
+        if (data[i] > maxVal) {
+            maxVal = data[i];
+            maxIdx = i;
+        }
     }
 
-    // --- Utils ---
-    _toTensor(inputData, selectedFeatures, dataType = 'auto') {
-        let keys = [];
-        if (selectedFeatures && selectedFeatures.length > 0) {
-            keys = selectedFeatures.sort();
-        } else {
-            keys = Object.keys(inputData).filter(k => typeof inputData[k] === 'number').sort();
-        }
+    // Apply smoothing with bypassed cooldown for gesture predictions
+    // Since gestures are infrequent, we don't need cooldown between them
+    const rawPrediction = {
+        label: classArray[maxIdx],
+        confidence: maxVal,
+        confidences: confidences,
+        timestamp: Date.now()
+    };
 
-        if (keys.length === 0) return null;
+    return this._smoothPrediction(rawPrediction, classArray, true); // bypassCooldown = true
+}
 
-        // Detect data type if auto
-        if (dataType === 'auto') {
-            dataType = this._detectDataType(inputData, keys);
-        }
+stopTraining() {
+    this.isTraining = false;
+}
 
-        // Current snapshot - normalize based on data type
-        const currentValues = keys.map(k => {
-            const value = inputData[k] || 0;
-            return this._normalizeValue(value, dataType);
-        });
-
-        // Update history
-        this.history.push(currentValues);
-        if (this.history.length > this.windowSize) {
-            this.history.shift();
-        }
-
-        // If windowing is enabled, flatten history
-        if (this.windowSize > 1) {
-            // Fill with zeros if history is not full yet
-            let flattened = [];
-            for (let i = 0; i < this.windowSize; i++) {
-                const snapshot = this.history[this.history.length - 1 - i] || new Array(keys.length).fill(0);
-                flattened = [...snapshot, ...flattened]; // Maintain temporal order
-            }
-            return tf.tensor1d(flattened);
-        }
-
-        return tf.tensor1d(currentValues);
+// --- Utils ---
+_toTensor(inputData, selectedFeatures, dataType = 'auto') {
+    let keys = [];
+    if (selectedFeatures && selectedFeatures.length > 0) {
+        keys = selectedFeatures.sort();
+    } else {
+        keys = Object.keys(inputData).filter(k => typeof inputData[k] === 'number').sort();
     }
 
-    // Detect data type from input data characteristics
-    _detectDataType(inputData, keys) {
-        // 0. First check if data is already normalized (most common case for Serial Bridge)
-        const sampleValues = keys.slice(0, Math.min(20, keys.length)).map(k => Math.abs(inputData[k] || 0));
+    if (keys.length === 0) return null;
+
+    // Detect data type if auto
+    if (dataType === 'auto') {
+        dataType = this._detectDataType(inputData, keys);
+    }
+
+    // Current snapshot - normalize based on data type
+    const currentValues = keys.map(k => {
+        const value = inputData[k] || 0;
+        return this._normalizeValue(value, dataType);
+    });
+
+    // Update history
+    this.history.push(currentValues);
+    if (this.history.length > this.windowSize) {
+        this.history.shift();
+    }
+
+    // If windowing is enabled, flatten history
+    if (this.windowSize > 1) {
+        // Fill with zeros if history is not full yet
+        let flattened = [];
+        for (let i = 0; i < this.windowSize; i++) {
+            const snapshot = this.history[this.history.length - 1 - i] || new Array(keys.length).fill(0);
+            flattened = [...snapshot, ...flattened]; // Maintain temporal order
+        }
+        return tf.tensor1d(flattened);
+    }
+
+    return tf.tensor1d(currentValues);
+}
+
+// Detect data type from input data characteristics
+_detectDataType(inputData, keys) {
+    // 0. First check if data is already normalized (most common case for Serial Bridge)
+    const sampleValues = keys.slice(0, Math.min(20, keys.length)).map(k => Math.abs(inputData[k] || 0));
+    const maxAbs = Math.max(...sampleValues);
+    const minAbs = Math.min(...sampleValues.filter(v => v > 0));
+
+    // If values are already in [-1, 1] range, assume already normalized
+    // Allow slight overflow (up to 1.2) for edge cases
+    if (maxAbs <= 1.2 && (minAbs === 0 || minAbs >= 0)) {
+        // Check if it's image data (0-1 range) or sensor data (-1 to 1 range)
+        const hasNegative = keys.some(k => (inputData[k] || 0) < 0);
+        if (!hasNegative && maxAbs <= 1.0) {
+            return 'image'; // Already normalized 0-1 (images/color)
+        }
+        // Has negative values or slightly over 1.0 = already normalized sensor data
+        return 'sensor'; // Already normalized, pass through
+    }
+
+    // 1. Check for image features (pixel data, already normalized 0-1)
+    if (keys.some(k => k.startsWith('px_') || (k.startsWith('f') && keys.length > 100))) {
+        // Check if values are in [0, 1] range (images/webcam embeddings)
+        const imgSampleValues = keys.slice(0, Math.min(10, keys.length)).map(k => inputData[k] || 0);
+        const maxVal = Math.max(...imgSampleValues);
+        const minVal = Math.min(...imgSampleValues);
+        if (minVal >= 0 && maxVal <= 1.1) {
+            return 'image'; // Already normalized
+        }
+    }
+
+    // 2. Check feature names for IMU patterns (ax, ay, az, gx, gy, gz, mx, my, mz)
+    const imuPatterns = ['ax', 'ay', 'az', 'gx', 'gy', 'gz', 'mx', 'my', 'mz'];
+    const hasIMUPatterns = imuPatterns.some(pattern =>
+        keys.some(k => k.toLowerCase() === pattern || k.toLowerCase().includes(pattern))
+    );
+
+    if (hasIMUPatterns) {
+        // IMU data - check value ranges
+        const sampleValues = keys.slice(0, Math.min(10, keys.length)).map(k => Math.abs(inputData[k] || 0));
+        const maxAbs = Math.max(...sampleValues);
+        // IMU typically ranges from -4 to +4 (accelerometer/gyro) or -50 to +50 (magnetometer)
+        if (maxAbs > 0.1 && maxAbs < 100) {
+            return 'imu';
+        }
+    }
+
+    // 3. Check for generic channel names (ch_0, ch_1, etc.) - could be IMU, EEG, or other
+    const hasChannelPattern = keys.some(k => /^ch[_\s]?\d+$/i.test(k) || /^channel[_\s]?\d+$/i.test(k));
+
+    if (hasChannelPattern) {
+        // Check value ranges to guess type
+        const sampleValues = keys.slice(0, Math.min(10, keys.length)).map(k => Math.abs(inputData[k] || 0));
         const maxAbs = Math.max(...sampleValues);
         const minAbs = Math.min(...sampleValues.filter(v => v > 0));
 
-        // If values are already in [-1, 1] range, assume already normalized
-        // Allow slight overflow (up to 1.2) for edge cases
-        if (maxAbs <= 1.2 && (minAbs === 0 || minAbs >= 0)) {
-            // Check if it's image data (0-1 range) or sensor data (-1 to 1 range)
-            const hasNegative = keys.some(k => (inputData[k] || 0) < 0);
-            if (!hasNegative && maxAbs <= 1.0) {
-                return 'image'; // Already normalized 0-1 (images/color)
-            }
-            // Has negative values or slightly over 1.0 = already normalized sensor data
-            return 'sensor'; // Already normalized, pass through
-        }
-
-        // 1. Check for image features (pixel data, already normalized 0-1)
-        if (keys.some(k => k.startsWith('px_') || (k.startsWith('f') && keys.length > 100))) {
-            // Check if values are in [0, 1] range (images/webcam embeddings)
-            const imgSampleValues = keys.slice(0, Math.min(10, keys.length)).map(k => inputData[k] || 0);
-            const maxVal = Math.max(...imgSampleValues);
-            const minVal = Math.min(...imgSampleValues);
-            if (minVal >= 0 && maxVal <= 1.1) {
-                return 'image'; // Already normalized
-            }
-        }
-
-        // 2. Check feature names for IMU patterns (ax, ay, az, gx, gy, gz, mx, my, mz)
-        const imuPatterns = ['ax', 'ay', 'az', 'gx', 'gy', 'gz', 'mx', 'my', 'mz'];
-        const hasIMUPatterns = imuPatterns.some(pattern =>
-            keys.some(k => k.toLowerCase() === pattern || k.toLowerCase().includes(pattern))
-        );
-
-        if (hasIMUPatterns) {
-            // IMU data - check value ranges
-            const sampleValues = keys.slice(0, Math.min(10, keys.length)).map(k => Math.abs(inputData[k] || 0));
-            const maxAbs = Math.max(...sampleValues);
-            // IMU typically ranges from -4 to +4 (accelerometer/gyro) or -50 to +50 (magnetometer)
-            if (maxAbs > 0.1 && maxAbs < 100) {
-                return 'imu';
-            }
-        }
-
-        // 3. Check for generic channel names (ch_0, ch_1, etc.) - could be IMU, EEG, or other
-        const hasChannelPattern = keys.some(k => /^ch[_\s]?\d+$/i.test(k) || /^channel[_\s]?\d+$/i.test(k));
-
-        if (hasChannelPattern) {
-            // Check value ranges to guess type
-            const sampleValues = keys.slice(0, Math.min(10, keys.length)).map(k => Math.abs(inputData[k] || 0));
-            const maxAbs = Math.max(...sampleValues);
-            const minAbs = Math.min(...sampleValues.filter(v => v > 0));
-
-            // EEG typically has larger values (microvolts: 10-200+)
-            if (maxAbs > 50) {
-                return 'eeg';
-            }
-            // IMU typically in [-4, 4] range
-            if (maxAbs > 0.1 && maxAbs < 20) {
-                return 'imu';
-            }
-            // Color sensors typically in [0, 1] after normalization
-            if (maxAbs <= 1.1 && minAbs >= 0) {
-                return 'image'; // Color data normalized
-            }
-        }
-
-        // 4. Check for EEG-specific patterns
-        if (keys.some(k => k.toLowerCase().includes('eeg') || k.toLowerCase().includes('electrode'))) {
-            return 'eeg';
-        }
-
-        // 5. Check for color sensor patterns (r, g, b, c, proximity)
-        const colorPatterns = ['r', 'g', 'b', 'red', 'green', 'blue', 'clear', 'proximity'];
-        const hasColorPatterns = colorPatterns.some(pattern =>
-            keys.some(k => k.toLowerCase() === pattern || k.toLowerCase().includes(pattern))
-        );
-        if (hasColorPatterns) {
-            const sampleValues = keys.slice(0, Math.min(10, keys.length)).map(k => inputData[k] || 0);
-            const maxVal = Math.max(...sampleValues);
-            const minVal = Math.min(...sampleValues);
-            // Color data is usually normalized to [0, 1]
-            if (minVal >= 0 && maxVal <= 1.1) {
-                return 'image'; // Color normalized
-            }
-        }
-
-        // 6. Check value ranges for generic sensor data (if not already normalized)
-        // If values are in IMU-like range, assume IMU
-        if (maxAbs > 0.1 && maxAbs < 20) {
-            return 'imu'; // Default to IMU for gesture recognition
-        }
-
-        // If values are large, assume EEG or unnormalized sensor
+        // EEG typically has larger values (microvolts: 10-200+)
         if (maxAbs > 50) {
             return 'eeg';
         }
-
-        // Default: conservative normalization for unknown sensor types
-        return 'sensor';
-    }
-
-    // Normalize a single value based on data type
-    _normalizeValue(value, dataType) {
-        switch (dataType) {
-            case 'image':
-                // Images are already normalized 0-1, just clamp
-                return Math.max(0, Math.min(1, value));
-
-            case 'imu':
-                // IMU sensor data (accelerometer/gyroscope): normalize to [-1, 1]
-                // Check if already normalized first (Serial Bridge often sends pre-normalized data)
-                if (Math.abs(value) <= 1.2) {
-                    // Already normalized, just clamp to safe range [-1, 1]
-                    return Math.max(-1, Math.min(1, value));
-                }
-                // Otherwise, normalize from typical raw IMU range: -4 to +4
-                return Math.max(-1, Math.min(1, value / 4.0));
-
-            case 'eeg':
-                // EEG data: normalize based on typical range (adjust as needed)
-                // Typical EEG range: -200 to +200 microvolts, but can vary
-                // Use adaptive normalization: divide by max observed or use fixed scale
-                return Math.max(-1, Math.min(1, value / 200.0));
-
-            case 'sensor':
-            default:
-                // Generic sensor data: try to detect if already normalized
-                // If value is in [-1, 1] range, assume already normalized
-                if (Math.abs(value) <= 1.1) {
-                    return value; // Already normalized
-                }
-                // Otherwise, apply conservative normalization
-                // Assume values might be in [-10, 10] range
-                return Math.max(-1, Math.min(1, value / 10.0));
+        // IMU typically in [-4, 4] range
+        if (maxAbs > 0.1 && maxAbs < 20) {
+            return 'imu';
+        }
+        // Color sensors typically in [0, 1] after normalization
+        if (maxAbs <= 1.1 && minAbs >= 0) {
+            return 'image'; // Color data normalized
         }
     }
 
-    // Normalize a sequence of samples (for gesture capture)
-    _normalizeSequence(samples, selectedFeatures, dataType = 'auto') {
-        let keys = [];
-        if (selectedFeatures && selectedFeatures.length > 0) {
-            keys = selectedFeatures.sort();
-        } else if (samples.length > 0) {
-            keys = Object.keys(samples[0]).filter(k => typeof samples[0][k] === 'number').sort();
-        }
-
-        if (keys.length === 0) return null;
-
-        // Detect data type from first sample
-        if (dataType === 'auto' && samples.length > 0) {
-            dataType = this._detectDataType(samples[0], keys);
-        }
-
-        // Flatten sequence: [sample1, sample2, ...] -> [sample1_features..., sample2_features..., ...]
-        const flattened = [];
-        samples.forEach(sample => {
-            keys.forEach(k => {
-                const value = sample[k] || 0;
-                flattened.push(this._normalizeValue(value, dataType));
-            });
-        });
-
-        return flattened;
+    // 4. Check for EEG-specific patterns
+    if (keys.some(k => k.toLowerCase().includes('eeg') || k.toLowerCase().includes('electrode'))) {
+        return 'eeg';
     }
 
-    // Smooth predictions using majority voting + cooldown (Tiny Motion Trainer approach)
-    // bypassCooldown: for gesture-triggered predictions, skip cooldown since predictions are already infrequent
-    _smoothPrediction(rawPrediction, classArray, bypassCooldown = false) {
-        const now = Date.now();
-
-        // Add to history
-        this.predictionHistory.push(rawPrediction);
-        if (this.predictionHistory.length > this.smoothingWindow) {
-            this.predictionHistory.shift();
+    // 5. Check for color sensor patterns (r, g, b, c, proximity)
+    const colorPatterns = ['r', 'g', 'b', 'red', 'green', 'blue', 'clear', 'proximity'];
+    const hasColorPatterns = colorPatterns.some(pattern =>
+        keys.some(k => k.toLowerCase() === pattern || k.toLowerCase().includes(pattern))
+    );
+    if (hasColorPatterns) {
+        const sampleValues = keys.slice(0, Math.min(10, keys.length)).map(k => inputData[k] || 0);
+        const maxVal = Math.max(...sampleValues);
+        const minVal = Math.min(...sampleValues);
+        // Color data is usually normalized to [0, 1]
+        if (minVal >= 0 && maxVal <= 1.1) {
+            return 'image'; // Color normalized
         }
+    }
 
-        // If confidence is too low, return last stable prediction or null
-        if (rawPrediction.confidence < this.confidenceThreshold) {
-            if (this.lastStablePrediction) {
-                return {
-                    ...this.lastStablePrediction,
-                    lowConfidence: true
-                };
+    // 6. Check value ranges for generic sensor data (if not already normalized)
+    // If values are in IMU-like range, assume IMU
+    if (maxAbs > 0.1 && maxAbs < 20) {
+        return 'imu'; // Default to IMU for gesture recognition
+    }
+
+    // If values are large, assume EEG or unnormalized sensor
+    if (maxAbs > 50) {
+        return 'eeg';
+    }
+
+    // Default: conservative normalization for unknown sensor types
+    return 'sensor';
+}
+
+// Normalize a single value based on data type
+_normalizeValue(value, dataType) {
+    switch (dataType) {
+        case 'image':
+            // Images are already normalized 0-1, just clamp
+            return Math.max(0, Math.min(1, value));
+
+        case 'imu':
+            // IMU sensor data (accelerometer/gyroscope): normalize to [-1, 1]
+            // Check if already normalized first (Serial Bridge often sends pre-normalized data)
+            if (Math.abs(value) <= 1.2) {
+                // Already normalized, just clamp to safe range [-1, 1]
+                return Math.max(-1, Math.min(1, value));
             }
-            return null;
-        }
+            // Otherwise, normalize from typical raw IMU range: -4 to +4
+            return Math.max(-1, Math.min(1, value / 4.0));
 
-        // Majority voting: count how many times each class was predicted
-        const voteCounts = {};
-        classArray.forEach(cls => {
-            voteCounts[cls] = 0;
-        });
+        case 'eeg':
+            // EEG data: normalize based on typical range (adjust as needed)
+            // Typical EEG range: -200 to +200 microvolts, but can vary
+            // Use adaptive normalization: divide by max observed or use fixed scale
+            return Math.max(-1, Math.min(1, value / 200.0));
 
-        // Count votes (only from high-confidence predictions)
-        this.predictionHistory.forEach(pred => {
-            if (pred.confidence >= this.confidenceThreshold) {
-                voteCounts[pred.label] = (voteCounts[pred.label] || 0) + 1;
+        case 'sensor':
+        default:
+            // Generic sensor data: try to detect if already normalized
+            // If value is in [-1, 1] range, assume already normalized
+            if (Math.abs(value) <= 1.1) {
+                return value; // Already normalized
             }
+            // Otherwise, apply conservative normalization
+            // Assume values might be in [-10, 10] range
+            return Math.max(-1, Math.min(1, value / 10.0));
+    }
+}
+
+// Normalize a sequence of samples (for gesture capture)
+_normalizeSequence(samples, selectedFeatures, dataType = 'auto') {
+    let keys = [];
+    if (selectedFeatures && selectedFeatures.length > 0) {
+        keys = selectedFeatures.sort();
+    } else if (samples.length > 0) {
+        keys = Object.keys(samples[0]).filter(k => typeof samples[0][k] === 'number').sort();
+    }
+
+    if (keys.length === 0) return null;
+
+    // Detect data type from first sample
+    if (dataType === 'auto' && samples.length > 0) {
+        dataType = this._detectDataType(samples[0], keys);
+    }
+
+    // Flatten sequence: [sample1, sample2, ...] -> [sample1_features..., sample2_features..., ...]
+    const flattened = [];
+    samples.forEach(sample => {
+        keys.forEach(k => {
+            const value = sample[k] || 0;
+            flattened.push(this._normalizeValue(value, dataType));
         });
+    });
 
-        // Find class with most votes
-        let majorityLabel = classArray[0];
-        let maxVotes = voteCounts[majorityLabel];
-        classArray.forEach(cls => {
-            if (voteCounts[cls] > maxVotes) {
-                maxVotes = voteCounts[cls];
-                majorityLabel = cls;
-            }
-        });
+    return flattened;
+}
 
-        // Calculate average confidence for majority class
-        const majorityPredictions = this.predictionHistory.filter(
-            p => p.label === majorityLabel && p.confidence >= this.confidenceThreshold
-        );
-        const avgConfidence = majorityPredictions.length > 0
-            ? majorityPredictions.reduce((sum, p) => sum + p.confidence, 0) / majorityPredictions.length
-            : rawPrediction.confidence;
+// Smooth predictions using majority voting + cooldown (Tiny Motion Trainer approach)
+// bypassCooldown: for gesture-triggered predictions, skip cooldown since predictions are already infrequent
+_smoothPrediction(rawPrediction, classArray, bypassCooldown = false) {
+    const now = Date.now();
 
-        // Calculate smoothed confidences (weighted average of recent predictions)
-        const smoothedConfidences = {};
-        classArray.forEach(cls => {
-            smoothedConfidences[cls] = 0;
-        });
+    // Add to history
+    this.predictionHistory.push(rawPrediction);
+    if (this.predictionHistory.length > this.smoothingWindow) {
+        this.predictionHistory.shift();
+    }
 
-        // Weighted average: more recent = more weight
-        let totalWeight = 0;
-        this.predictionHistory.forEach((pred, idx) => {
-            const weight = (idx + 1) / this.predictionHistory.length;
-            classArray.forEach(cls => {
-                smoothedConfidences[cls] += (pred.confidences[cls] || 0) * weight;
-            });
-            totalWeight += weight;
-        });
-
-        classArray.forEach(cls => {
-            smoothedConfidences[cls] /= totalWeight;
-        });
-
-        // Cooldown: only change prediction if enough time has passed
-        // For gesture-triggered predictions, bypass cooldown since predictions are already infrequent
-        const timeSinceLastChange = now - this.lastPredictionChangeTime;
-        const currentLabel = this.lastStablePrediction ? this.lastStablePrediction.label : null;
-        const shouldUpdate = !currentLabel ||
-            majorityLabel === currentLabel ||
-            bypassCooldown || // NEW: bypass cooldown for gesture predictions
-            timeSinceLastChange >= this.predictionCooldown;
-
-        if (shouldUpdate && avgConfidence >= this.confidenceThreshold) {
-            const predictionChanged = currentLabel && majorityLabel !== currentLabel;
-
-            this.lastStablePrediction = {
-                label: majorityLabel,
-                confidence: avgConfidence,
-                confidences: smoothedConfidences
-            };
-
-            // Only update timestamp if prediction actually changed
-            if (predictionChanged) {
-                this.lastPredictionChangeTime = now;
-            }
-        }
-
-        // Return last stable prediction (with updated confidences)
+    // If confidence is too low, return last stable prediction or null
+    if (rawPrediction.confidence < this.confidenceThreshold) {
         if (this.lastStablePrediction) {
             return {
                 ...this.lastStablePrediction,
-                confidences: smoothedConfidences // Update confidences even if label doesn't change
+                lowConfidence: true
             };
         }
+        return null;
+    }
 
-        return {
+    // Majority voting: count how many times each class was predicted
+    const voteCounts = {};
+    classArray.forEach(cls => {
+        voteCounts[cls] = 0;
+    });
+
+    // Count votes (only from high-confidence predictions)
+    this.predictionHistory.forEach(pred => {
+        if (pred.confidence >= this.confidenceThreshold) {
+            voteCounts[pred.label] = (voteCounts[pred.label] || 0) + 1;
+        }
+    });
+
+    // Find class with most votes
+    let majorityLabel = classArray[0];
+    let maxVotes = voteCounts[majorityLabel];
+    classArray.forEach(cls => {
+        if (voteCounts[cls] > maxVotes) {
+            maxVotes = voteCounts[cls];
+            majorityLabel = cls;
+        }
+    });
+
+    // Calculate average confidence for majority class
+    const majorityPredictions = this.predictionHistory.filter(
+        p => p.label === majorityLabel && p.confidence >= this.confidenceThreshold
+    );
+    const avgConfidence = majorityPredictions.length > 0
+        ? majorityPredictions.reduce((sum, p) => sum + p.confidence, 0) / majorityPredictions.length
+        : rawPrediction.confidence;
+
+    // Calculate smoothed confidences (weighted average of recent predictions)
+    const smoothedConfidences = {};
+    classArray.forEach(cls => {
+        smoothedConfidences[cls] = 0;
+    });
+
+    // Weighted average: more recent = more weight
+    let totalWeight = 0;
+    this.predictionHistory.forEach((pred, idx) => {
+        const weight = (idx + 1) / this.predictionHistory.length;
+        classArray.forEach(cls => {
+            smoothedConfidences[cls] += (pred.confidences[cls] || 0) * weight;
+        });
+        totalWeight += weight;
+    });
+
+    classArray.forEach(cls => {
+        smoothedConfidences[cls] /= totalWeight;
+    });
+
+    // Cooldown: only change prediction if enough time has passed
+    // For gesture-triggered predictions, bypass cooldown since predictions are already infrequent
+    const timeSinceLastChange = now - this.lastPredictionChangeTime;
+    const currentLabel = this.lastStablePrediction ? this.lastStablePrediction.label : null;
+    const shouldUpdate = !currentLabel ||
+        majorityLabel === currentLabel ||
+        bypassCooldown || // NEW: bypass cooldown for gesture predictions
+        timeSinceLastChange >= this.predictionCooldown;
+
+    if (shouldUpdate && avgConfidence >= this.confidenceThreshold) {
+        const predictionChanged = currentLabel && majorityLabel !== currentLabel;
+
+        this.lastStablePrediction = {
             label: majorityLabel,
             confidence: avgConfidence,
             confidences: smoothedConfidences
         };
+
+        // Only update timestamp if prediction actually changed
+        if (predictionChanged) {
+            this.lastPredictionChangeTime = now;
+        }
     }
 
-    // Set confidence threshold (0.0 to 1.0)
-    setConfidenceThreshold(threshold) {
-        this.confidenceThreshold = Math.max(0, Math.min(1, threshold));
+    // Return last stable prediction (with updated confidences)
+    if (this.lastStablePrediction) {
+        return {
+            ...this.lastStablePrediction,
+            confidences: smoothedConfidences // Update confidences even if label doesn't change
+        };
     }
 
-    // Set smoothing window size
-    setSmoothingWindow(size) {
-        this.smoothingWindow = Math.max(1, Math.min(20, size));
-    }
+    return {
+        label: majorityLabel,
+        confidence: avgConfidence,
+        confidences: smoothedConfidences
+    };
+}
 
-    // Set prediction cooldown (ms between prediction changes)
-    setPredictionCooldown(ms) {
-        this.predictionCooldown = Math.max(0, Math.min(1000, ms));
-    }
+// Set confidence threshold (0.0 to 1.0)
+setConfidenceThreshold(threshold) {
+    this.confidenceThreshold = Math.max(0, Math.min(1, threshold));
+}
 
-    clearAll() {
-        this.classifier.clearAllClasses();
-        this.classes.clear();
-        this.denseData = [];
-        this.denseModel = null;
-        this.denseModelType = null;
-        this.regressionOutputIds = null;
+// Set smoothing window size
+setSmoothingWindow(size) {
+    this.smoothingWindow = Math.max(1, Math.min(20, size));
+}
 
-        Object.values(this.regressionData).forEach(examples => {
-            examples.forEach(ex => ex.tensor.dispose());
+// Set prediction cooldown (ms between prediction changes)
+setPredictionCooldown(ms) {
+    this.predictionCooldown = Math.max(0, Math.min(1000, ms));
+}
+
+clearAll() {
+    this.classifier.clearAllClasses();
+    this.classes.clear();
+    this.denseData = [];
+    this.denseModel = null;
+    this.denseModelType = null;
+    this.regressionOutputIds = null;
+
+    Object.values(this.regressionData).forEach(examples => {
+        examples.forEach(ex => ex.tensor.dispose());
+    });
+    this.regressionData = {};
+    this.previousRegressionValues = {};
+    this.history = []; // Clear history
+    this.predictionHistory = []; // Clear prediction history
+    this.lastStablePrediction = null; // Clear stable prediction
+}
+
+clearClassData(classId) {
+    // Remove from KNN classifier
+    this.classifier.clearClass(classId);
+
+    // Remove from classes set
+    this.classes.delete(classId);
+
+    // Remove from denseData (unified dataset)
+    this.denseData = this.denseData.filter(sample => sample.label !== classId);
+
+    console.log(`[MLEngine] Cleared all data for class: ${classId}`);
+}
+
+
+getClassCounts() {
+    return this.classifier.getClassExampleCount();
+}
+
+getRegressionCounts() {
+    const counts = {};
+    Object.entries(this.regressionData).forEach(([id, list]) => {
+        counts[id] = list.length;
+    });
+    return counts;
+}
+
+// --- Data Management ---
+removeSample(index) {
+    if (index < 0 || index >= this.denseData.length) return;
+
+    // Remove from unified dataset
+    const removed = this.denseData.splice(index, 1)[0];
+
+    // Synchronize internal KNN states (if applicable)
+    this._rebuildKnnState();
+    return true;
+}
+
+_rebuildKnnState() {
+    // 1. Clear KNN Classifiers
+    this.classifier.clearAllClasses();
+    this.regressionData = {};
+    this.classes.clear();
+
+    // 2. Re-populate from current denseData
+    this.denseData.forEach(sample => {
+        // Use tf.tidy to ensure tensors are cleaned up even if exception occurs
+        tf.tidy(() => {
+            const tensor = tf.tensor1d(sample.features);
+
+            if (sample.type === 'classification' || sample.type === 'dense') {
+                this.classifier.addExample(tensor, sample.label);
+                this.classes.add(sample.label);
+            } else if (sample.type === 'regression') {
+                if (!this.regressionData[sample.label]) {
+                    this.regressionData[sample.label] = [];
+                }
+                // Clone tensor outside of tidy since we need to keep it
+                const clonedTensor = tensor.clone();
+                this.regressionData[sample.label].push({
+                    tensor: clonedTensor,
+                    target: sample.target
+                });
+            }
         });
-        this.regressionData = {};
-        this.previousRegressionValues = {};
-        this.history = []; // Clear history
-        this.predictionHistory = []; // Clear prediction history
-        this.lastStablePrediction = null; // Clear stable prediction
-    }
+    });
+}
 
-    clearClassData(classId) {
-        // Remove from KNN classifier
-        this.classifier.clearClass(classId);
+exportData() {
+    const data = {
+        classification: {},
+        regression: {},
+        unifiedDataset: this.denseData // Persist the hub data
+    };
 
-        // Remove from classes set
-        this.classes.delete(classId);
-
-        // Remove from denseData (unified dataset)
-        this.denseData = this.denseData.filter(sample => sample.label !== classId);
-
-        console.log(`[MLEngine] Cleared all data for class: ${classId}`);
-    }
-
-
-    getClassCounts() {
-        return this.classifier.getClassExampleCount();
-    }
-
-    getRegressionCounts() {
-        const counts = {};
-        Object.entries(this.regressionData).forEach(([id, list]) => {
-            counts[id] = list.length;
+    if (this.classifier.getNumClasses() > 0) {
+        const dataset = this.classifier.getClassifierDataset();
+        Object.keys(dataset).forEach(classId => {
+            const tensor = dataset[classId];
+            data.classification[classId] = {
+                shape: tensor.shape,
+                values: Array.from(tensor.dataSync())
+            };
         });
-        return counts;
     }
 
-    // --- Data Management ---
-    removeSample(index) {
-        if (index < 0 || index >= this.denseData.length) return;
+    Object.entries(this.regressionData).forEach(([outId, examples]) => {
+        data.regression[outId] = examples.map(ex => ({
+            shape: ex.tensor.shape,
+            values: Array.from(ex.tensor.dataSync()),
+            target: ex.target
+        }));
+    });
 
-        // Remove from unified dataset
-        const removed = this.denseData.splice(index, 1)[0];
+    return data;
+}
 
-        // Synchronize internal KNN states (if applicable)
-        this._rebuildKnnState();
-        return true;
-    }
+importData(data) {
+    if (!data) return false;
 
-    _rebuildKnnState() {
-        // 1. Clear KNN Classifiers
-        this.classifier.clearAllClasses();
-        this.regressionData = {};
-        this.classes.clear();
+    try {
+        this.clearAll();
 
-        // 2. Re-populate from current denseData
-        this.denseData.forEach(sample => {
-            // Use tf.tidy to ensure tensors are cleaned up even if exception occurs
-            tf.tidy(() => {
+        if (data.classification) {
+            const dataset = {};
+            Object.keys(data.classification).forEach(classId => {
+                const { shape, values } = data.classification[classId];
+                dataset[classId] = tf.tensor(values, shape);
+            });
+            this.classifier.setClassifierDataset(dataset);
+            Object.keys(dataset).forEach(k => this.classes.add(k));
+        }
+
+        if (data.regression) {
+            Object.entries(data.regression).forEach(([outId, examples]) => {
+                this.regressionData[outId] = examples.map(ex => ({
+                    tensor: tf.tensor(ex.values, ex.shape),
+                    target: ex.target
+                }));
+            });
+        }
+
+        if (data.unifiedDataset) {
+            this.denseData = data.unifiedDataset;
+
+            // CRITICAL: Rebuild internal KNN structures from unified dataset for prediction
+            this.denseData.forEach(sample => {
                 const tensor = tf.tensor1d(sample.features);
-
                 if (sample.type === 'classification' || sample.type === 'dense') {
                     this.classifier.addExample(tensor, sample.label);
                     this.classes.add(sample.label);
@@ -959,238 +1050,160 @@ class MLEngine {
                     if (!this.regressionData[sample.label]) {
                         this.regressionData[sample.label] = [];
                     }
-                    // Clone tensor outside of tidy since we need to keep it
-                    const clonedTensor = tensor.clone();
                     this.regressionData[sample.label].push({
-                        tensor: clonedTensor,
+                        tensor: tensor.clone(),
                         target: sample.target
                     });
                 }
+                tensor.dispose();
             });
-        });
-    }
+        } else {
+            // Backward compatibility: Rebuild denseData from internal structures
+            this.denseData = [];
 
-    exportData() {
-        const data = {
-            classification: {},
-            regression: {},
-            unifiedDataset: this.denseData // Persist the hub data
-        };
-
-        if (this.classifier.getNumClasses() > 0) {
-            const dataset = this.classifier.getClassifierDataset();
-            Object.keys(dataset).forEach(classId => {
-                const tensor = dataset[classId];
-                data.classification[classId] = {
-                    shape: tensor.shape,
-                    values: Array.from(tensor.dataSync())
-                };
+            // From Classification
+            const classifierDataset = this.classifier.getClassifierDataset();
+            Object.entries(classifierDataset).forEach(([label, dataset]) => {
+                const dataArray = dataset.dataSync();
+                const shape = dataset.shape; // [numExamples, valSize]
+                const valSize = shape[1];
+                for (let i = 0; i < shape[0]; i++) {
+                    const slice = dataArray.slice(i * valSize, (i + 1) * valSize);
+                    this.denseData.push({
+                        features: Array.from(slice),
+                        label: label,
+                        type: 'classification',
+                        timestamp: Date.now()
+                    });
+                }
             });
-        }
 
-        Object.entries(this.regressionData).forEach(([outId, examples]) => {
-            data.regression[outId] = examples.map(ex => ({
-                shape: ex.tensor.shape,
-                values: Array.from(ex.tensor.dataSync()),
-                target: ex.target
-            }));
-        });
-
-        return data;
-    }
-
-    importData(data) {
-        if (!data) return false;
-
-        try {
-            this.clearAll();
-
-            if (data.classification) {
-                const dataset = {};
-                Object.keys(data.classification).forEach(classId => {
-                    const { shape, values } = data.classification[classId];
-                    dataset[classId] = tf.tensor(values, shape);
-                });
-                this.classifier.setClassifierDataset(dataset);
-                Object.keys(dataset).forEach(k => this.classes.add(k));
-            }
-
-            if (data.regression) {
-                Object.entries(data.regression).forEach(([outId, examples]) => {
-                    this.regressionData[outId] = examples.map(ex => ({
-                        tensor: tf.tensor(ex.values, ex.shape),
-                        target: ex.target
-                    }));
-                });
-            }
-
-            if (data.unifiedDataset) {
-                this.denseData = data.unifiedDataset;
-
-                // CRITICAL: Rebuild internal KNN structures from unified dataset for prediction
-                this.denseData.forEach(sample => {
-                    const tensor = tf.tensor1d(sample.features);
-                    if (sample.type === 'classification' || sample.type === 'dense') {
-                        this.classifier.addExample(tensor, sample.label);
-                        this.classes.add(sample.label);
-                    } else if (sample.type === 'regression') {
-                        if (!this.regressionData[sample.label]) {
-                            this.regressionData[sample.label] = [];
-                        }
-                        this.regressionData[sample.label].push({
-                            tensor: tensor.clone(),
-                            target: sample.target
-                        });
-                    }
-                    tensor.dispose();
-                });
-            } else {
-                // Backward compatibility: Rebuild denseData from internal structures
-                this.denseData = [];
-
-                // From Classification
-                const classifierDataset = this.classifier.getClassifierDataset();
-                Object.entries(classifierDataset).forEach(([label, dataset]) => {
-                    const dataArray = dataset.dataSync();
-                    const shape = dataset.shape; // [numExamples, valSize]
-                    const valSize = shape[1];
-                    for (let i = 0; i < shape[0]; i++) {
-                        const slice = dataArray.slice(i * valSize, (i + 1) * valSize);
-                        this.denseData.push({
-                            features: Array.from(slice),
-                            label: label,
-                            type: 'classification',
-                            timestamp: Date.now()
-                        });
-                    }
-                });
-
-                // From Regression
-                Object.entries(this.regressionData).forEach(([label, examples]) => {
-                    examples.forEach(ex => {
-                        this.denseData.push({
-                            features: Array.from(ex.tensor.dataSync()),
-                            label: label,
-                            target: ex.target,
-                            type: 'regression',
-                            timestamp: Date.now()
-                        });
+            // From Regression
+            Object.entries(this.regressionData).forEach(([label, examples]) => {
+                examples.forEach(ex => {
+                    this.denseData.push({
+                        features: Array.from(ex.tensor.dataSync()),
+                        label: label,
+                        target: ex.target,
+                        type: 'regression',
+                        timestamp: Date.now()
                     });
                 });
-            }
-
-            return true;
-        } catch (e) {
-            console.error("Failed to import data:", e);
-            return false;
+            });
         }
+
+        return true;
+    } catch (e) {
+        console.error("Failed to import data:", e);
+        return false;
     }
+}
 
 
 
     async exportModelWeb() {
-        if (!this.denseModel) {
-            throw new Error("No trained model to export.");
+    if (!this.denseModel) {
+        throw new Error("No trained model to export.");
+    }
+
+    console.log("[Web Export] Model Input Shape:", this.denseModel.inputs[0].shape);
+
+    const zip = new JSZip();
+
+    // Use custom save handler to intercept artifacts
+    await this.denseModel.save(tf.io.withSaveHandler(async (artifacts) => {
+        // 1. Create proper model.json structure matching TF.js requirements
+        const modelJSON = {
+            modelTopology: artifacts.modelTopology,
+            format: artifacts.format,
+            generatedBy: artifacts.generatedBy,
+            convertedBy: artifacts.convertedBy,
+            weightsManifest: [{
+                paths: ['./weights.bin'], // Point to the file in the zip
+                weights: artifacts.weightSpecs
+            }]
+        };
+
+        zip.file("model/model.json", JSON.stringify(modelJSON));
+
+        // 2. Save weights.bin
+        if (artifacts.weightData) {
+            zip.file("model/weights.bin", artifacts.weightData);
         }
 
-        console.log("[Web Export] Model Input Shape:", this.denseModel.inputs[0].shape);
+        // 3. Add metadata (Hybrid: Compatible with BOTH ml5.js and Teachable Machine)
+        const classesAList = Array.from(this.classes).sort();
+        const metadata = {
+            // Teachable Machine standard fields
+            tfjsVersion: "1.3.1",
+            tmVersion: "2.4.4",
+            packageVersion: "0.8.4",
+            packageName: "@teachablemachine/image",
+            timeStamp: new Date().toISOString(),
+            userMetadata: {
+                labels: classesAList
+            },
+            modelName: "ml-bridge-model",
+            labels: classesAList,
+            imageSize: 224,
 
-        const zip = new JSZip();
+            // ml5.js explicit fields (Required for decoding labels)
+            outputs: [{
+                uniqueValues: classesAList,
+                units: classesAList.length,
+                activation: 'softmax'
+            }]
+        };
+        zip.file('model/metadata.json', JSON.stringify(metadata, null, 2));
 
-        // Use custom save handler to intercept artifacts
-        await this.denseModel.save(tf.io.withSaveHandler(async (artifacts) => {
-            // 1. Create proper model.json structure matching TF.js requirements
-            const modelJSON = {
-                modelTopology: artifacts.modelTopology,
-                format: artifacts.format,
-                generatedBy: artifacts.generatedBy,
-                convertedBy: artifacts.convertedBy,
-                weightsManifest: [{
-                    paths: ['./weights.bin'], // Point to the file in the zip
-                    weights: artifacts.weightSpecs
-                }]
-            };
+        // 4. Bundle MobileNet (Vision Model) to ensure 100% Parity
+        // We fetch the EXACT files used by the app from the public folder
+        try {
+            const mobilenetFiles = [
+                'model.json',
+                'group1-shard1of4',
+                'group1-shard2of4',
+                'group1-shard3of4',
+                'group1-shard4of4'
+            ];
 
-            zip.file("model/model.json", JSON.stringify(modelJSON));
-
-            // 2. Save weights.bin
-            if (artifacts.weightData) {
-                zip.file("model/weights.bin", artifacts.weightData);
+            for (const file of mobilenetFiles) {
+                const response = await fetch(`./models/mobilenet/${file}`);
+                if (!response.ok) throw new Error(`Failed to fetch ${file}`);
+                const blob = await response.blob();
+                zip.file(`models/mobilenet/${file}`, blob);
             }
+            console.log("[Web Export] Bundled MobileNet successfully.");
+        } catch (e) {
+            console.error("[Web Export] Failed to bundle MobileNet:", e);
+            // We don't block export, but user will need to copy manually if this fails
+        }
 
-            // 3. Add metadata (Hybrid: Compatible with BOTH ml5.js and Teachable Machine)
-            const classesAList = Array.from(this.classes).sort();
-            const metadata = {
-                // Teachable Machine standard fields
-                tfjsVersion: "1.3.1",
-                tmVersion: "2.4.4",
-                packageVersion: "0.8.4",
-                packageName: "@teachablemachine/image",
-                timeStamp: new Date().toISOString(),
-                userMetadata: {
-                    labels: classesAList
-                },
-                modelName: "ml-bridge-model",
-                labels: classesAList,
-                imageSize: 224,
+        console.log("[Web Export] Created metadata.json with labels:", classesAList);
 
-                // ml5.js explicit fields (Required for decoding labels)
-                outputs: [{
-                    uniqueValues: classesAList,
-                    units: classesAList.length,
-                    activation: 'softmax'
-                }]
-            };
-            zip.file('model/metadata.json', JSON.stringify(metadata, null, 2));
-
-            // 4. Bundle MobileNet (Vision Model) to ensure 100% Parity
-            // We fetch the EXACT files used by the app from the public folder
-            try {
-                const mobilenetFiles = [
-                    'model.json',
-                    'group1-shard1of4',
-                    'group1-shard2of4',
-                    'group1-shard3of4',
-                    'group1-shard4of4'
-                ];
-
-                for (const file of mobilenetFiles) {
-                    const response = await fetch(`./models/mobilenet/${file}`);
-                    if (!response.ok) throw new Error(`Failed to fetch ${file}`);
-                    const blob = await response.blob();
-                    zip.file(`models/mobilenet/${file}`, blob);
-                }
-                console.log("[Web Export] Bundled MobileNet successfully.");
-            } catch (e) {
-                console.error("[Web Export] Failed to bundle MobileNet:", e);
-                // We don't block export, but user will need to copy manually if this fails
+        return {
+            modelArtifactsInfo: {
+                dateSaved: new Date(),
+                modelTopologyType: 'JSON',
             }
+        };
+    }));
 
-            console.log("[Web Export] Created metadata.json with labels:", classesAList);
+    // Generate Zip Blob
+    const blob = await zip.generateAsync({ type: "blob" });
 
-            return {
-                modelArtifactsInfo: {
-                    dateSaved: new Date(),
-                    modelTopologyType: 'JSON',
-                }
-            };
-        }));
+    // Trigger Download
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "ml-bridge-model-web.zip";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
 
-        // Generate Zip Blob
-        const blob = await zip.generateAsync({ type: "blob" });
-
-        // Trigger Download
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "ml-bridge-model-web.zip";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 100);
-
-        return true;
-    }
+    return true;
+}
 }
 
 export const mlEngine = new MLEngine();
