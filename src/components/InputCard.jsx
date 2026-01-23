@@ -4,7 +4,7 @@ import { Lock } from 'lucide-react';
 
 export function InputCard({ incomingData, connectionStatus, isProMode, selectedFeatures, onToggleFeature, hasTrainingData }) {
     // Extract number of keys for display stats
-    const featureCount = Object.keys(incomingData).length;
+    const featureCount = Object.keys(incomingData || {}).length;
 
     return (
         <div className="col-span-12 lg:col-span-4 fui-panel p-0 flex flex-col h-full min-h-[500px] overflow-hidden relative">

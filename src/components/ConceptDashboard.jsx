@@ -562,7 +562,7 @@ export function ConceptDashboard({
                                 const embeddingEntries = [];
                                 const regularEntries = [];
 
-                                Object.entries(incomingData).forEach(([key, val]) => {
+                                Object.entries(incomingData || {}).forEach(([key, val]) => {
                                     if (inputSource === 'webcam' && key.startsWith('f') && /^f\d+$/.test(key)) {
                                         embeddingEntries.push([key, val]);
                                     } else {
@@ -1167,7 +1167,7 @@ export function ConceptDashboard({
                     <div className="mt-auto p-4 border-t border-[#222] bg-[#050505]">
                         <div className="grid grid-cols-2 gap-4">
                             <StatMetric label="LATENCY" value="12" unit="ms" active={true} />
-                            <StatMetric label="ACCURACY" value={prediction && prediction.confidences && Object.keys(prediction.confidences).length > 0 ? (Math.max(...Object.values(prediction.confidences)) * 100).toFixed(1) : "0.0"} unit="%" active={!!prediction} />
+                            <StatMetric label="ACCURACY" value={prediction?.confidences && Object.keys(prediction.confidences).length > 0 ? (Math.max(...Object.values(prediction.confidences || {})) * 100).toFixed(1) : "0.0"} unit="%" active={!!prediction} />
                         </div>
                     </div>
                 </aside>

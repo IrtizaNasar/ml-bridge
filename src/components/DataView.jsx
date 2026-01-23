@@ -13,26 +13,12 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
 
     // Load data from memory on mount
     useEffect(() => {
-        console.log('[DataView] Mounting...');
-        try {
-            console.log('[DataView] ReactWindow:', ReactWindow);
-            console.log('[DataView] MLEngine:', mlEngine);
-            refreshData();
-        } catch (e) {
-            console.error('[DataView] Error during mount/refresh:', e);
-        }
+        refreshData();
     }, []);
 
     const refreshData = () => {
-        console.log('[DataView] refreshing data...');
         setIsLoading(true);
-        if (!mlEngine) {
-            console.error('[DataView] mlEngine is undefined!');
-            setIsLoading(false);
-            return;
-        }
         const rawData = mlEngine.denseData || [];
-        console.log('[DataView] rawData length:', rawData.length);
 
         const formatted = rawData.map((d, i) => ({
             id: i,
