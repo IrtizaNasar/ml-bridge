@@ -43,6 +43,17 @@ function StatMetric({ label, value, unit, active }) {
 
 /* --- SUB-COMPONENTS --- */
 
+function getAccuracyValue(prediction) {
+    try {
+        if (!prediction || !prediction.confidences) return "0.0";
+        const vals = Object.values(prediction.confidences || {});
+        if (vals.length === 0) return "0.0";
+        return (Math.max(...vals) * 100).toFixed(1);
+    } catch (e) {
+        return "0.0";
+    }
+}
+
 function FeatureRow({ label, value, active, color, onClick }) {
     return (
         <div
@@ -1167,7 +1178,7 @@ export function ConceptDashboard({
                     <div className="mt-auto p-4 border-t border-[#222] bg-[#050505]">
                         <div className="grid grid-cols-2 gap-4">
                             <StatMetric label="LATENCY" value="12" unit="ms" active={true} />
-                            <StatMetric label="ACCURACY" value={prediction?.confidences && Object.keys(prediction.confidences).length > 0 ? (Math.max(...Object.values(prediction.confidences || {})) * 100).toFixed(1) : "0.0"} unit="%" active={!!prediction} />
+                            <StatMetric label="ACCURACY" value={getAccuracyValue(prediction)} unit="%" active={!!prediction} />
                         </div>
                     </div>
                 </aside>

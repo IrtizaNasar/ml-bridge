@@ -93,7 +93,7 @@ class MLEngine {
                     result.confidence = result.confidences[result.label];
                 } else {
                     // Fallback: Find max confidence manually
-                    const values = Object.values(result.confidences);
+                    const values = Object.values(result.confidences || {});
                     result.confidence = values.length > 0 ? Math.max(...values) : 0;
                 }
             } else {
