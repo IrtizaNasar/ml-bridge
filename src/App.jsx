@@ -868,24 +868,19 @@ function App() {
     // --- Data Import/Export Handlers ---
     const handleSaveData = async () => {
         try {
-            const data = mlEngine.exportData();
-            const jsonString = JSON.stringify(data, null, 2);
+            // Create map for ID -> Name resolution
+            const classNameMap = classes.reduce((acc, cls) => {
+                acc[cls.id] = cls.name;
+                return acc;
+            }, {});
 
-            if (window.api && window.api.file) {
-                const result = await window.api.file.saveDataset(jsonString);
-                if (result.success) {
-                    console.log('[App] Dataset saved successfully:', result.filePath);
-                } else if (!result.canceled) {
-                    console.error('[App] Failed to save dataset:', result.error);
-                    setLastError('Failed to save dataset: ' + (result.error || 'Unknown error'));
-                }
-            } else {
-                console.error('[App] File API not available');
-                setLastError('File API not available. Are you running in Electron?');
-            }
+            console.log('[App] Exporting for Arduino Check...');
+            // Check if exportModelArduino exists (it might throw if not implemented)
+            await mlEngine.exportModelArduino(classNameMap);
+
         } catch (e) {
-            console.error('[App] Save error:', e);
-            setLastError('Failed to save dataset: ' + e.message);
+            console.error('[App] Arduino export failed:', e);
+            setLastError(e.message || "Arduino export failed");
         }
     };
 
@@ -1012,6 +1007,7 @@ function App() {
                     setTargetDeviceId={setTargetDeviceId}
                     serialFormat={serialFormat}
                     setSerialFormat={setSerialFormat}
+                    mlEngine={mlEngine} // Pass singleton to avoid import issues in children
                 />
             </ErrorBoundary>
 

@@ -10,12 +10,22 @@ export function DeployView({
     protocol, setProtocol, // Lifted state from App.jsx
     targetDeviceId, setTargetDeviceId, // Lifted state from App.jsx
     serialFormat, setSerialFormat, // Lifted state from App.jsx
-    onExportWeb
+
+    onExportWeb,
+    classes = [] // Add classes prop
 }) {
     // const [protocol, setProtocol] = useState('osc'); // REMOVED - now props
     const [wsStatus, setWsStatus] = useState('disconnected');
     // const [targetDeviceId, setTargetDeviceId] = useState(''); // REMOVED - now props
     const [logs, setLogs] = useState(['[SYSTEM] Bridge Ready.']);
+
+    // Create map for ID -> Name lookup
+    const classNameMap = useMemo(() => {
+        return classes.reduce((acc, cls) => {
+            acc[cls.id] = cls.name;
+            return acc;
+        }, {});
+    }, [classes]);
 
     const protocols = [
         { id: 'osc', label: 'OSC (Open Sound Control)', icon: <Wifi size={14} />, detail: 'UDP 127.0.0.1:12000' },
@@ -72,7 +82,10 @@ export function DeployView({
                                         {trainingMode === 'classification' ? (
                                             <>
                                                 <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest mb-3">Detected Class</div>
-                                                <div className="text-4xl md:text-5xl font-light text-white mb-3 tracking-tighter">{prediction.label}</div>
+                                                {/* Use mapped name if available */}
+                                                <div className="text-4xl md:text-5xl font-light text-white mb-3 tracking-tighter">
+                                                    {classNameMap[prediction.label] || prediction.label}
+                                                </div>
                                                 <div className="inline-flex items-center justify-center px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-mono">
                                                     {(Math.max(...Object.values(prediction.confidences || {})) * 100).toFixed(1)}% CONFIDENCE
                                                 </div>

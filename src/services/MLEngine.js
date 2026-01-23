@@ -1028,7 +1028,7 @@ class MLEngine {
         });
     }
 
-    exportData() {
+    exportData(classNameMap = {}) {
         const data = {
             classification: {},
             regression: {},
@@ -1146,7 +1146,14 @@ class MLEngine {
 
 
 
-    async exportModelWeb() {
+    async exportModelArduino(classNameMap = {}) {
+        // Placeholder for Arduino Export
+        // Ideally this would generate TFLite Tensors or C Header
+        console.warn("Arduino Export logic not implemented based on TFLite/Micro.");
+        throw new Error("Arduino Export is currently unavailable. Requires TFLite Micro implementation.");
+    }
+
+    async exportModelWeb(classNameMap = {}) {
         if (!this.denseModel) {
             throw new Error("No trained model to export.");
         }
@@ -1178,6 +1185,9 @@ class MLEngine {
 
             // 3. Add metadata (Hybrid: Compatible with BOTH ml5.js and Teachable Machine)
             const classesAList = Array.from(this.classes).sort();
+            // Use mapped names for classes in metadata.json
+            const labels = classesAList.map(id => classNameMap[id] || id);
+
             const metadata = {
                 // Teachable Machine standard fields
                 tfjsVersion: "1.3.1",
@@ -1186,16 +1196,16 @@ class MLEngine {
                 packageName: "@teachablemachine/image",
                 timeStamp: new Date().toISOString(),
                 userMetadata: {
-                    labels: classesAList
+                    labels: labels
                 },
                 modelName: "ml-bridge-model",
-                labels: classesAList,
+                labels: labels,
                 imageSize: 224,
 
                 // ml5.js explicit fields (Required for decoding labels)
                 outputs: [{
-                    uniqueValues: classesAList,
-                    units: classesAList.length,
+                    uniqueValues: labels,
+                    units: labels.length,
                     activation: 'softmax'
                 }]
             };

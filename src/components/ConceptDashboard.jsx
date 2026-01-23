@@ -431,7 +431,8 @@ export function ConceptDashboard({
     dataRefreshKey,
     protocol, setProtocol,
     targetDeviceId, setTargetDeviceId,
-    serialFormat, setSerialFormat
+    serialFormat, setSerialFormat,
+    mlEngine // Receive singleton
 }) {
     // Internal dashboard state (View switching)
     const [activeView, setActiveView] = useState('training'); // 'data' | 'training' | 'models' | 'deploy'
@@ -678,6 +679,8 @@ export function ConceptDashboard({
                         {/* DATA TAB (New) */}
                         {activeView === 'data' && (
                             <DataView
+                                engine={mlEngine} // Renamed prop
+                                classes={classes}
                                 onLoad={onLoad}
                                 onSave={onSave}
                                 onDeleteSample={onDeleteSample}
@@ -769,6 +772,7 @@ export function ConceptDashboard({
                                 onTrainModel={handleTrainModel}
                                 onExportArduino={handleExportArduino}
                                 onExportWeb={onExportWeb}
+                                classes={classes} // Pass classes logic for label display
                                 onClearError={() => { }}
                                 onUpload={onUpload}
                                 inputSource={inputSource}

@@ -1,10 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Database, Filter, Download, Upload, Trash2, Search, Table, RefreshCw } from 'lucide-react';
-import { mlEngine } from '../services/MLEngine';
 import { UI_CONSTANTS } from '../constants';
 
-export function DataView({ onLoad, onSave, onDeleteSample }) {
+export function DataView({ onLoad, onSave, onDeleteSample, classes = [], engine }) {
     const [samples, setSamples] = useState([]);
+
+    // Create a map for fast ID -> Name lookup
+    const classNameMap = useMemo(() => {
+        return classes.reduce((acc, cls) => {
+            acc[cls.id] = cls.name;
+            return acc;
+        }, {});
+    }, [classes]);
     const [stats, setStats] = useState({ totalContexts: 0, totalSamples: 0, classes: 0 });
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedClass, setSelectedClass] = useState('all');
@@ -18,14 +25,25 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
     const refreshData = () => {
         setIsLoading(true);
         try {
-            const rawData = mlEngine.denseData || [];
+            if (!engine) {
+                console.warn("DataView: Engine not ready");
+                setIsLoading(false);
+                return;
+            }
+            const rawData = engine.denseData || [];
             if (!Array.isArray(rawData)) throw new Error("Invalid data format");
 
             const formatted = rawData.map((d, i) => {
                 try {
+                    // Resolve label: Use map if available, otherwise raw label
+                    const rawLabel = d.label || 'Unknown';
+                    const displayLabel = d.type === 'regression'
+                        ? `TARGET: ${(d.target || 0).toFixed(2)}`
+                        : (classNameMap[rawLabel] || rawLabel);
+
                     return {
                         id: i,
-                        label: d.type === 'regression' ? `TARGET: ${(d.target || 0).toFixed(2)}` : (d.label || 'Unknown'),
+                        label: displayLabel,
                         type: d.type || 'classification',
                         features: d.features?.length || 0,
                         thumbnail: d.thumbnail,
