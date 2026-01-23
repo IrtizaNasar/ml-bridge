@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import * as ReactWindow from 'react-window';
 import { Database, Filter, Download, Upload, Trash2, Search, Table, RefreshCw } from 'lucide-react';
-import { FixedSizeList as List } from 'react-window';
 import { mlEngine } from '../services/MLEngine';
 import { UI_CONSTANTS } from '../constants';
 
@@ -201,7 +201,7 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
 
                 {/* Virtual Scrolling List */}
                 {filteredSamples.length > 0 ? (
-                    <List
+                    <ReactWindow.FixedSizeList
                         height={window.innerHeight - UI_CONSTANTS.DATAVIEW_HEADER_HEIGHT}
                         itemCount={filteredSamples.length}
                         itemSize={UI_CONSTANTS.VIRTUAL_SCROLL_ROW_HEIGHT}
@@ -209,7 +209,7 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
                         className="scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent"
                     >
                         {Row}
-                    </List>
+                    </ReactWindow.FixedSizeList>
                 ) : (
                     <div className="px-6 py-24 text-center text-zinc-700 italic text-xs">
                         No samples found. Record some data in the Training tab or Import a dataset.
