@@ -64,7 +64,7 @@ export function InputCard({ incomingData, connectionStatus, isProMode, selectedF
                             <span>Value</span>
                         </div>
 
-                        {Object.entries(incomingData).map(([key, val]) => {
+                        {Object.entries(incomingData || {}).map(([key, val]) => {
                             const isSelected = selectedFeatures.has(key);
                             return (
                                 <div key={key} className={`flex justify-between items-center px-4 py-3 rounded-lg transition-all cursor-pointer group border ${isSelected ? 'bg-white/[0.03] border-white/5' : 'border-transparent hover:bg-white/[0.02]'}`} onClick={() => !hasTrainingData && onToggleFeature(key)}>
