@@ -5,6 +5,7 @@ import { mlEngine } from './services/MLEngine';
 import { webcamManager } from './services/WebcamManager';
 import { FEATURE_DETECTION } from './constants';
 import { logCompatibilityWarnings, checkFeatureSupport } from './browserCompat';
+import { validateClassName, sanitizeInput } from './utils';
 
 
 // Components
@@ -702,22 +703,21 @@ function App() {
     };
 
     const renameClass = (id, newName) => {
-        // Validate and sanitize name
-        const trimmed = newName?.trim() || '';
-
-        // Prevent empty names - revert to ID as fallback
-        if (trimmed === '') {
-            setClasses(prev => prev.map(c =>
-                c.id === id ? { ...c, name: c.id } : c
-            ));
+        // Validate class name
+        const validation = validateClassName(newName);
+        if (!validation.valid) {
+            alert(validation.error);
+            // Revert to current name
             return;
         }
 
+        // Sanitize input to prevent XSS
+        const sanitized = sanitizeInput(newName);
+
         // Update UI state only - dataset uses IDs, not names
         setClasses(prev => prev.map(c =>
-            c.id === id ? { ...c, name: trimmed } : c
+            c.id === id ? { ...c, name: sanitized } : c
         ));
-
         // No need to update MLEngine - dataset always uses class IDs
     };
 
