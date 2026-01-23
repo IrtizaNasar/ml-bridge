@@ -201,7 +201,7 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
 
                 {/* Virtual Scrolling List */}
                 {filteredSamples.length > 0 ? (
-                    <ReactWindow.FixedSizeList
+                    <ReactWindow.List
                         height={window.innerHeight - UI_CONSTANTS.DATAVIEW_HEADER_HEIGHT}
                         itemCount={filteredSamples.length}
                         itemSize={UI_CONSTANTS.VIRTUAL_SCROLL_ROW_HEIGHT}
@@ -209,7 +209,7 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
                         className="scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent"
                     >
                         {Row}
-                    </ReactWindow.FixedSizeList>
+                    </ReactWindow.List>
                 ) : (
                     <div className="px-6 py-24 text-center text-zinc-700 italic text-xs">
                         No samples found. Record some data in the Training tab or Import a dataset.
