@@ -607,13 +607,31 @@ function App() {
     };
 
     const removeClass = (id) => {
+        // Remove from UI
         setClasses(prev => prev.filter(c => c.id !== id));
+
+        // Remove all data for this class from MLEngine
+        mlEngine.clearClassData(id);
     };
 
     const renameClass = (id, newName) => {
-        setClasses(prev => prev.map(c => c.id === id ? { ...c, name: newName } : c));
-        // Update stored training data labels in MLEngine
-        mlEngine.renameClass(id, newName);
+        // Validate and sanitize name
+        const trimmed = newName?.trim() || '';
+
+        // Prevent empty names - revert to ID as fallback
+        if (trimmed === '') {
+            setClasses(prev => prev.map(c =>
+                c.id === id ? { ...c, name: c.id } : c
+            ));
+            return;
+        }
+
+        // Update UI state only - dataset uses IDs, not names
+        setClasses(prev => prev.map(c =>
+            c.id === id ? { ...c, name: trimmed } : c
+        ));
+
+        // No need to update MLEngine - dataset always uses class IDs
     };
 
     // Dynamic Output Management (Regression)
@@ -802,17 +820,35 @@ function App() {
                         const classCounts = mlEngine.getClassCounts();
                         const regCounts = mlEngine.getRegressionCounts();
 
-                        // Update classes state
-                        setClasses(prev => prev.map(c => ({
-                            ...c,
-                            count: classCounts[c.id] || 0
-                        })));
+                        // Rebuild classes from dataset (don't just update existing)
+                        const loadedClassIds = Object.keys(classCounts);
+                        const newClasses = loadedClassIds.map(classId => {
+                            // Check if class already exists in UI state
+                            const existing = classes.find(c => c.id === classId);
+                            return {
+                                id: classId,
+                                name: existing?.name || classId, // Preserve custom name if exists
+                                count: classCounts[classId] || 0
+                            };
+                        });
 
-                        // Update outputs state
-                        setOutputs(prev => prev.map(o => ({
-                            ...o,
-                            samples: regCounts[o.id] || 0
-                        })));
+                        // Only keep classes that have data
+                        setClasses(newClasses.filter(c => c.count > 0));
+
+                        // Rebuild outputs from dataset
+                        const loadedOutputIds = Object.keys(regCounts);
+                        const newOutputs = loadedOutputIds.map(outputId => {
+                            const existing = outputs.find(o => o.id === outputId);
+                            return {
+                                id: outputId,
+                                name: existing?.name || outputId,
+                                value: existing?.value || 0.5, // Default value
+                                samples: regCounts[outputId] || 0
+                            };
+                        });
+
+                        // Only keep outputs that have data
+                        setOutputs(newOutputs.filter(o => o.samples > 0));
 
                         // Clear prediction and training state
                         setPrediction(null);
@@ -820,6 +856,7 @@ function App() {
                         setIsRunning(false);
 
                         console.log('[App] Dataset loaded successfully');
+                        console.log(`[App] Loaded ${newClasses.length} classes, ${newOutputs.length} outputs`);
                     } else {
                         setLastError('Failed to import dataset. File may be corrupted.');
                     }

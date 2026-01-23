@@ -902,20 +902,19 @@ class MLEngine {
         this.lastStablePrediction = null; // Clear stable prediction
     }
 
-    renameClass(oldId, newId) {
-        // Update all stored training data labels
-        this.denseData.forEach(sample => {
-            if (sample.label === oldId) {
-                sample.label = newId;
-            }
-        });
+    clearClassData(classId) {
+        // Remove from KNN classifier
+        this.classifier.clearClass(classId);
 
-        // Update classes set
-        if (this.classes.has(oldId)) {
-            this.classes.delete(oldId);
-            this.classes.add(newId);
-        }
+        // Remove from classes set
+        this.classes.delete(classId);
+
+        // Remove from denseData (unified dataset)
+        this.denseData = this.denseData.filter(sample => sample.label !== classId);
+
+        console.log(`[MLEngine] Cleared all data for class: ${classId}`);
     }
+
 
     getClassCounts() {
         return this.classifier.getClassExampleCount();

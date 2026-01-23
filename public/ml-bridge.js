@@ -2,6 +2,7 @@
  * ML Bridge Client Library
  * 
  * Simple wrapper for connecting to ML Bridge via WebSockets.
+ * Uses Web Worker to prevent throttling when browser tab is hidden.
  * 
  * Usage:
  *   const ml = new MLBridge();
@@ -19,7 +20,7 @@ class MLBridge {
         }
 
         this.serverUrl = serverUrl;
-        this.socket = null;
+        this.worker = null;
         this.connected = false;
 
         // Event handlers
@@ -31,8 +32,59 @@ class MLBridge {
     }
 
     connect() {
+        // Check if Web Workers are supported
+        if (typeof Worker === 'undefined') {
+            console.warn('[MLBridge] Web Workers not supported, falling back to direct connection');
+            this._connectDirect();
+            return;
+        }
+
+        console.log(`[MLBridge] Starting worker connection to ${this.serverUrl}...`);
+
+        // Create worker
+        this.worker = new Worker('http://localhost:3100/ml-bridge-worker.js');
+
+        // Listen for messages from worker
+        this.worker.addEventListener('message', (event) => {
+            const { type, status, data } = event.data;
+
+            switch (type) {
+                case 'STATUS':
+                    if (status === 'connected') {
+                        console.log('[MLBridge] Connected!');
+                        this.connected = true;
+                        this._notifyStatus('connected');
+                    } else if (status === 'disconnected') {
+                        console.log('[MLBridge] Disconnected');
+                        this.connected = false;
+                        this._notifyStatus('disconnected');
+                    }
+                    break;
+
+                case 'PREDICTION':
+                    this.predictionHandlers.forEach(handler => handler(data));
+                    break;
+
+                case 'SERVER_STATUS':
+                    // Handle other status messages if needed
+                    break;
+            }
+        });
+
+        this.worker.addEventListener('error', (error) => {
+            console.error('[MLBridge] Worker error:', error);
+            console.log('[MLBridge] Falling back to direct connection');
+            this._connectDirect();
+        });
+
+        // Start connection
+        this.worker.postMessage({ type: 'CONNECT', data: { serverUrl: this.serverUrl } });
+    }
+
+    _connectDirect() {
+        // Fallback: Direct Socket.IO connection (may be throttled)
         if (typeof io === 'undefined') {
-            console.error('MLBridge: Socket.IO not found. Please add <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>');
+            console.error('[MLBridge] Socket.IO not found. Please add <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>');
             return;
         }
 
@@ -51,14 +103,24 @@ class MLBridge {
             this._notifyStatus('disconnected');
         });
 
-        // Main Event: 'prediction'
-        // Payload: { label: "class_1", confidence: 0.99, ... } OR { regression: { "out_1": 0.5 } }
         this.socket.on('prediction', (data) => {
             this.predictionHandlers.forEach(handler => handler(data));
         });
     }
 
-    // --- Public API ---
+    disconnect() {
+        if (this.worker) {
+            this.worker.postMessage({ type: 'DISCONNECT' });
+            this.worker.terminate();
+            this.worker = null;
+        } else if (this.socket) {
+            this.socket.disconnect();
+            this.socket = null;
+        }
+        this.connected = false;
+    }
+
+    // --- Public API (unchanged) ---
 
     /**
      * Listen for any prediction (Classification or Regression)

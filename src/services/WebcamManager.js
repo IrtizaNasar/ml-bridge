@@ -33,7 +33,66 @@ class WebcamManager {
         if (this.isActive) return;
 
         try {
-            // Initialize Video
+            // STEP 1: Load MobileNet FIRST (before camera)
+            // This ensures features are always available before user can record data
+            if (!this.model && !this.isModelLoading) {
+                this.isModelLoading = true;
+                let attempts = 0;
+                const maxAttempts = 5;
+
+                console.log('[WebcamManager] Loading MobileNet before starting camera...');
+
+                while (attempts < maxAttempts && !this.model) {
+                    try {
+                        const attemptNum = attempts + 1;
+                        console.log(`[WebcamManager] Loading MobileNet (attempt ${attemptNum}/${maxAttempts})...`);
+
+                        // Load local model with timeout
+                        this.model = await Promise.race([
+                            mobilenet.load({
+                                version: 2,
+                                alpha: 1.0,
+                                modelUrl: './models/mobilenet/model.json'
+                            }),
+                            new Promise((_, reject) =>
+                                setTimeout(() => reject(new Error('Timeout')), 30000) // 30s timeout
+                            )
+                        ]);
+
+                        console.log('[WebcamManager] ✓ MobileNet loaded successfully');
+                        break; // Success!
+
+                    } catch (err) {
+                        attempts++;
+                        const isLastAttempt = attempts >= maxAttempts;
+
+                        console.error(`[WebcamManager] ✗ MobileNet load failed (attempt ${attempts}/${maxAttempts}):`, err.message);
+
+                        if (!isLastAttempt) {
+                            // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+                            const delay = Math.min(1000 * Math.pow(2, attempts - 1), 16000);
+                            console.log(`[WebcamManager] Retrying in ${delay / 1000}s...`);
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                        } else {
+                            this.isModelLoading = false;
+                            throw new Error(
+                                `Failed to load MobileNet after ${maxAttempts} attempts. ` +
+                                `Please check your internet connection and refresh the page.`
+                            );
+                        }
+                    }
+                }
+                this.isModelLoading = false;
+            }
+
+            // Verify model loaded before proceeding
+            if (!this.model) {
+                throw new Error('MobileNet model failed to load. Cannot start webcam.');
+            }
+
+            console.log('[WebcamManager] MobileNet ready, initializing camera...');
+
+            // STEP 2: Initialize Camera (only after MobileNet is loaded)
             this.video = document.createElement('video');
             this.video.width = 224; // MobileNet expects 224x224
             this.video.height = 224;
@@ -55,64 +114,37 @@ class WebcamManager {
             this.canvas.width = 224;
             this.canvas.height = 224;
 
-            // Load MobileNet with retry logic
-            if (!this.model && !this.isModelLoading) {
-                this.isModelLoading = true;
-                let attempts = 0;
-                const maxAttempts = 3;
-
-                while (attempts < maxAttempts && !this.model) {
-                    try {
-                        console.log(`[WebcamManager] Loading MobileNet (attempt ${attempts + 1}/${maxAttempts})...`);
-                        this.model = await mobilenet.load({
-                            version: 2,
-                            alpha: 1.0,
-                            modelUrl: './models/mobilenet/model.json'
-                        });
-                        console.log('[WebcamManager] ✓ MobileNet loaded successfully');
-                    } catch (err) {
-                        attempts++;
-                        console.error(`[WebcamManager] ✗ MobileNet load failed (attempt ${attempts}/${maxAttempts}):`, err);
-
-                        if (attempts < maxAttempts) {
-                            console.log('[WebcamManager] Retrying in 2 seconds...');
-                            await new Promise(resolve => setTimeout(resolve, 2000));
-                        } else {
-                            this.isModelLoading = false;
-                            throw new Error(`Failed to load MobileNet after ${maxAttempts} attempts. Please refresh the page.`);
-                        }
-                    }
-                }
-                this.isModelLoading = false;
-            }
-
-            // Wait for model to be ready before starting
-            if (!this.model) {
-                throw new Error('MobileNet model failed to load. Cannot start webcam.');
-            }
-
             this.isActive = true;
             this._notifyStreamUpdate();
 
-            // Helper to start loop when both ready
+            // Start feature extraction loop when video is ready
             const tryStartLoop = () => {
                 if (this.video && this.video.readyState >= 2 && this.model && !this.frameId) {
+                    console.log('[WebcamManager] ✓ Camera ready, starting feature extraction');
                     this.loop();
                 }
             };
 
-            // Try immediately (model might already be loaded)
+            // Try immediately
             tryStartLoop();
 
-            // Also try when video loads (in case model loaded first)
+            // Also try when video loads
             this.video.onloadeddata = () => {
                 tryStartLoop();
             };
 
         } catch (e) {
             console.error("Webcam/Model Error:", e);
+            this.isModelLoading = false;
             throw e;
         }
+    }
+
+    getLoadingState() {
+        return {
+            isLoading: this.isModelLoading,
+            isLoaded: !!this.model
+        };
     }
 
     getStream() {
