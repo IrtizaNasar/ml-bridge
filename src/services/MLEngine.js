@@ -948,21 +948,25 @@ class MLEngine {
 
         // 2. Re-populate from current denseData
         this.denseData.forEach(sample => {
-            const tensor = tf.tensor(sample.features);
+            // Use tf.tidy to ensure tensors are cleaned up even if exception occurs
+            tf.tidy(() => {
+                const tensor = tf.tensor1d(sample.features);
 
-            if (sample.type === 'classification' || sample.type === 'dense') {
-                this.classifier.addExample(tensor, sample.label);
-                this.classes.add(sample.label);
-            } else if (sample.type === 'regression') {
-                if (!this.regressionData[sample.label]) {
-                    this.regressionData[sample.label] = [];
+                if (sample.type === 'classification' || sample.type === 'dense') {
+                    this.classifier.addExample(tensor, sample.label);
+                    this.classes.add(sample.label);
+                } else if (sample.type === 'regression') {
+                    if (!this.regressionData[sample.label]) {
+                        this.regressionData[sample.label] = [];
+                    }
+                    // Clone tensor outside of tidy since we need to keep it
+                    const clonedTensor = tensor.clone();
+                    this.regressionData[sample.label].push({
+                        tensor: clonedTensor,
+                        target: sample.target
+                    });
                 }
-                this.regressionData[sample.label].push({
-                    tensor: tensor.clone(), // Clone since we might dispose or store
-                    target: sample.target
-                });
-            }
-            tensor.dispose();
+            });
         });
     }
 

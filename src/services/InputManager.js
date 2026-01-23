@@ -175,13 +175,37 @@ class InputManager {
     }
 
     _looseParse(raw, out) {
-        // Try loose object (e.g. {x: 1, y: 2} with or without quotes)
+        // Safe parsing for loose object format (e.g., x:1.5,y:2.3 or {x:1.5,y:2.3})
         if (raw.includes(':')) {
             try {
-                const loose = new Function("return " + (raw.includes('{') ? raw : `{${raw}}`))();
-                Object.assign(out, loose);
-                return;
-            } catch (e) { }
+                // Remove curly braces if present
+                const cleaned = raw.replace(/[{}]/g, '').trim();
+
+                // Split by comma to get key:value pairs
+                const pairs = cleaned.split(',');
+
+                pairs.forEach(pair => {
+                    // Safe regex: only allows alphanumeric keys and numeric values
+                    // Pattern: optional whitespace, key (letters/numbers/_), colon, number (with optional sign and decimal)
+                    const match = pair.match(/^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(-?[\d.]+)\s*$/);
+
+                    if (match) {
+                        const [, key, value] = match;
+                        const numValue = parseFloat(value);
+
+                        if (!isNaN(numValue) && isFinite(numValue)) {
+                            out[key] = numValue;
+                        }
+                    }
+                });
+
+                // If we successfully parsed any values, return
+                if (Object.keys(out).length > 0) {
+                    return;
+                }
+            } catch (e) {
+                console.warn('[InputManager] Failed to parse loose format:', e);
+            }
         }
 
         // Fallback: Split by comma or space and treat as numeric channels
@@ -190,10 +214,10 @@ class InputManager {
             if (part.includes(':')) {
                 const [key, val] = part.split(':');
                 const num = parseFloat(val);
-                if (!isNaN(num)) out[key.trim()] = num;
+                if (!isNaN(num) && isFinite(num)) out[key.trim()] = num;
             } else {
                 const num = parseFloat(part);
-                if (!isNaN(num)) out[`ch_${index}`] = num;
+                if (!isNaN(num) && isFinite(num)) out[`ch_${index}`] = num;
             }
         });
     }

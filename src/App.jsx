@@ -14,6 +14,7 @@ import { HubView } from './components/HubView';
 import { SettingsModal } from './components/SettingsModal';
 import { ConceptDashboard } from './components/ConceptDashboard';
 import { ConfirmModal } from './components/ConfirmModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 function App() {
     const [activeTab, setActiveTab] = useState('hub');
@@ -877,54 +878,56 @@ function App() {
 
     return (
         <div className="h-screen w-screen overflow-hidden bg-[#050505]">
-            <ConceptDashboard
-                classes={classes}
-                setClasses={setClasses}
-                outputs={outputs}
-                setOutputs={setOutputs}
-                prediction={prediction}
-                isRunning={isRunning}
-                setIsRunning={setIsRunning}
-                trainingMode={trainingMode}
-                setTrainingMode={setTrainingMode}
-                engineType={engineType}
-                setEngineType={setEngineType}
-                trainFrame={trainFrame}
-                onRemoveClass={removeClass}
-                onRenameClass={renameClass}
-                onAddClass={addClass}
-                onRemoveOutput={removeOutput}
-                onUpdateOutputTarget={updateOutputTarget}
-                onAddOutput={addOutput}
-                handleTrainModel={handleTrainModel}
-                isModelTraining={isTraining}
-                trainingProgress={trainingProgress}
-                trainingConfig={trainingConfig}
-                setTrainingConfig={setTrainingConfig}
-                isCapturingAuto={isCapturingAuto}
-                recordingClassId={recordingClassId}
-                setRecordingClassId={setRecordingClassId}
-                windowSize={windowSize}
-                setWindowSize={setWindowSize}
-                incomingData={incomingData}
-                selectedFeatures={selectedFeatures}
-                toggleFeature={toggleFeature}
-                clearModel={clearModel}
-                inputSource={inputSource}
-                setInputSource={handleSelectInputSource}
-                onDeleteSample={deleteSample}
-                onUpload={handleUpload}
-                onTestUpload={handleTestUpload}
-                onSave={handleSaveData}
-                onLoad={handleLoadData}
-                dataRefreshKey={dataRefreshKey}
-                protocol={protocol}
-                setProtocol={setProtocol}
-                targetDeviceId={targetDeviceId}
-                setTargetDeviceId={setTargetDeviceId}
-                serialFormat={serialFormat}
-                setSerialFormat={setSerialFormat}
-            />
+            <ErrorBoundary>
+                <ConceptDashboard
+                    classes={classes}
+                    setClasses={setClasses}
+                    outputs={outputs}
+                    setOutputs={setOutputs}
+                    prediction={prediction}
+                    isRunning={isRunning}
+                    setIsRunning={setIsRunning}
+                    trainingMode={trainingMode}
+                    setTrainingMode={setTrainingMode}
+                    engineType={engineType}
+                    setEngineType={setEngineType}
+                    trainFrame={trainFrame}
+                    onRemoveClass={removeClass}
+                    onRenameClass={renameClass}
+                    onAddClass={addClass}
+                    onRemoveOutput={removeOutput}
+                    onUpdateOutputTarget={updateOutputTarget}
+                    onAddOutput={addOutput}
+                    handleTrainModel={handleTrainModel}
+                    isModelTraining={isTraining}
+                    trainingProgress={trainingProgress}
+                    trainingConfig={trainingConfig}
+                    setTrainingConfig={setTrainingConfig}
+                    isCapturingAuto={isCapturingAuto}
+                    recordingClassId={recordingClassId}
+                    setRecordingClassId={setRecordingClassId}
+                    windowSize={windowSize}
+                    setWindowSize={setWindowSize}
+                    incomingData={incomingData}
+                    selectedFeatures={selectedFeatures}
+                    toggleFeature={toggleFeature}
+                    clearModel={clearModel}
+                    inputSource={inputSource}
+                    setInputSource={handleSelectInputSource}
+                    onDeleteSample={deleteSample}
+                    onUpload={handleUpload}
+                    onTestUpload={handleTestUpload}
+                    onSave={handleSaveData}
+                    onLoad={handleLoadData}
+                    dataRefreshKey={dataRefreshKey}
+                    protocol={protocol}
+                    setProtocol={setProtocol}
+                    targetDeviceId={targetDeviceId}
+                    setTargetDeviceId={setTargetDeviceId}
+                    serialFormat={serialFormat}
+                    setSerialFormat={setSerialFormat}
+                />
+            </ErrorBoundary>
 
             {/* Source Change Confirmation Modal */}
             <ConfirmModal

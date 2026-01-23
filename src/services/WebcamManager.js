@@ -180,6 +180,8 @@ class WebcamManager {
         }
 
         if (this.video) {
+            // Remove event listener to prevent memory leak
+            this.video.onloadeddata = null;
             this.video.srcObject = null;
             this.video.remove();
             this.video = null;
