@@ -4,6 +4,7 @@ import { inputManager } from './services/InputManager';
 import { mlEngine } from './services/MLEngine';
 import { webcamManager } from './services/WebcamManager';
 import { FEATURE_DETECTION } from './constants';
+import { logCompatibilityWarnings, checkFeatureSupport } from './browserCompat';
 
 
 // Components
@@ -107,15 +108,31 @@ function App() {
 
     // PERFORMANCE: Initialize TensorFlow.js with WebGL backend for faster inference
     useEffect(() => {
+        // Log browser compatibility warnings
+        logCompatibilityWarnings();
+
         const initTensorFlow = async () => {
             try {
-                await tf.setBackend('webgl');
-                await tf.ready();
-                console.log('[TensorFlow] Backend initialized:', tf.getBackend());
-                console.log('[TensorFlow] WebGL enabled - 5-10x faster inference');
+                // Check WebGL support before attempting to use it
+                if (checkFeatureSupport('webgl')) {
+                    await tf.setBackend('webgl');
+                    await tf.ready();
+                    console.log('[TensorFlow] Backend initialized:', tf.getBackend());
+                    console.log('[TensorFlow] WebGL enabled - 5-10x faster inference');
+                } else {
+                    console.warn('[TensorFlow] WebGL not supported, using CPU backend');
+                    await tf.setBackend('cpu');
+                    await tf.ready();
+                }
             } catch (e) {
-                console.warn('[TensorFlow] WebGL not available, using CPU backend');
+                console.warn('[TensorFlow] Failed to initialize WebGL, falling back to CPU');
                 console.warn('[TensorFlow] Error:', e.message);
+                try {
+                    await tf.setBackend('cpu');
+                    await tf.ready();
+                } catch (cpuError) {
+                    console.error('[TensorFlow] Failed to initialize any backend:', cpuError);
+                }
             }
         };
         initTensorFlow();
