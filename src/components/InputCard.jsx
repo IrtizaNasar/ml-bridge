@@ -64,22 +64,29 @@ export function InputCard({ incomingData, connectionStatus, isProMode, selectedF
                             <span>Value</span>
                         </div>
 
-                        {Object.entries(incomingData || {}).map(([key, val]) => {
-                            const isSelected = selectedFeatures.has(key);
-                            return (
-                                <div key={key} className={`flex justify-between items-center px-4 py-3 rounded-lg transition-all cursor-pointer group border ${isSelected ? 'bg-white/[0.03] border-white/5' : 'border-transparent hover:bg-white/[0.02]'}`} onClick={() => !hasTrainingData && onToggleFeature(key)}>
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all ${isSelected ? 'bg-emerald-500 border-emerald-500 shadow-sm' : 'border-white/20 group-hover:border-white/40'}`}>
-                                            {isSelected && <div className="text-black text-[10px]">✓</div>}
+                        {(() => {
+                            try {
+                                return Object.entries(incomingData || {}).map(([key, val]) => {
+                                    const isSelected = selectedFeatures.has(key);
+                                    return (
+                                        <div key={key} className={`flex justify-between items-center px-4 py-3 rounded-lg transition-all cursor-pointer group border ${isSelected ? 'bg-white/[0.03] border-white/5' : 'border-transparent hover:bg-white/[0.02]'}`} onClick={() => !hasTrainingData && onToggleFeature(key)}>
+                                            <div className="flex items-center gap-3">
+                                                <div className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all ${isSelected ? 'bg-emerald-500 border-emerald-500 shadow-sm' : 'border-white/20 group-hover:border-white/40'}`}>
+                                                    {isSelected && <div className="text-black text-[10px]">✓</div>}
+                                                </div>
+                                                <span className={`text-sm font-medium font-sans ${isSelected ? 'text-white/90' : 'text-white/40'}`}>{key}</span>
+                                            </div>
+                                            <span className={`font-mono-tech tabular-nums text-[11px] ${isSelected ? 'text-emerald-400' : 'text-white/30'}`}>
+                                                {typeof val === 'number' ? val.toFixed(3) : String(val)}
+                                            </span>
                                         </div>
-                                        <span className={`text-sm font-medium font-sans ${isSelected ? 'text-white/90' : 'text-white/40'}`}>{key}</span>
-                                    </div>
-                                    <span className={`font-mono-tech tabular-nums text-[11px] ${isSelected ? 'text-emerald-400' : 'text-white/30'}`}>
-                                        {typeof val === 'number' ? val.toFixed(3) : String(val)}
-                                    </span>
-                                </div>
-                            );
-                        })}
+                                    );
+                                });
+                            } catch (e) {
+                                console.error("InputCard Render Error:", e);
+                                return null;
+                            }
+                        })()}
                     </div>
                 ) : (
                     <div className="flex h-full flex-col items-center justify-center text-white/20 gap-3">

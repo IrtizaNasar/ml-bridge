@@ -18,26 +18,37 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
 
     const refreshData = () => {
         setIsLoading(true);
-        const rawData = mlEngine.denseData || [];
+        try {
+            const rawData = mlEngine.denseData || [];
+            if (!Array.isArray(rawData)) throw new Error("Invalid data format");
 
-        const formatted = rawData.map((d, i) => ({
-            id: i,
-            label: d.type === 'regression' ? `TARGET: ${d.target.toFixed(2)}` : d.label,
-            type: d.type || 'classification',
-            features: d.features.length,
-            thumbnail: d.thumbnail,
-            valPreview: d.features.slice(0, 5).map(v => typeof v === 'number' ? v.toFixed(2) : v).join(', '),
-            timestamp: d.timestamp ? new Date(d.timestamp).toLocaleString() : new Date().toISOString()
-        }));
+            const formatted = rawData.map((d, i) => {
+                try {
+                    return {
+                        id: i,
+                        label: d.type === 'regression' ? `TARGET: ${(d.target || 0).toFixed(2)}` : (d.label || 'Unknown'),
+                        type: d.type || 'classification',
+                        features: d.features?.length || 0,
+                        thumbnail: d.thumbnail,
+                        valPreview: (d.features || []).slice(0, 5).map(v => typeof v === 'number' ? v.toFixed(2) : v).join(', '),
+                        timestamp: d.timestamp ? new Date(d.timestamp).toLocaleString() : new Date().toISOString()
+                    };
+                } catch (err) {
+                    console.error("Error formatting sample:", i, err);
+                    return null;
+                }
+            }).filter(Boolean);
 
-        setSamples(formatted);
+            setSamples(formatted);
 
-        setStats({
-            totalSamples: formatted.length,
-            classes: new Set(rawData.map(s => s.label)).size,
-            inputDim: formatted.length > 0 ? rawData[0].features.length : 0
-        });
-
+            setStats({
+                totalSamples: formatted.length,
+                classes: new Set(rawData.map(s => s.label)).size,
+                inputDim: formatted.length > 0 ? (rawData[0]?.features?.length || 0) : 0
+            });
+        } catch (e) {
+            console.error("DataView refresh failed:", e);
+        }
         setTimeout(() => setIsLoading(false), 300);
     };
 
@@ -51,10 +62,15 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
     // PERFORMANCE: Memoize filtered samples to avoid recalculating on every render
     const filteredSamples = useMemo(() => {
         return samples.filter(s => {
-            const matchesSearch = s.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                s.valPreview.includes(searchQuery);
-            const matchesClass = selectedClass === 'all' || s.label === selectedClass;
-            return matchesSearch && matchesClass;
+            if (!s) return false;
+            try {
+                const matchesSearch = (s.label || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    (s.valPreview || '').includes(searchQuery);
+                const matchesClass = selectedClass === 'all' || s.label === selectedClass;
+                return matchesSearch && matchesClass;
+            } catch (e) {
+                return false;
+            }
         });
     }, [samples, searchQuery, selectedClass]);
 
