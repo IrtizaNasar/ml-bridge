@@ -223,7 +223,7 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
                         itemSize={UI_CONSTANTS.VIRTUAL_SCROLL_ROW_HEIGHT}
                         width="100%"
                         className="scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent"
-                        key={`${filteredSamples.length}-${dataRefreshKey}`} // Force re-mount on length change
+                        key={filteredSamples.length} // Force re-mount on length change
                     >
                         {Row}
                     </ReactWindow.List>
