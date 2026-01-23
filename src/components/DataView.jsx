@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Database, Filter, Download, Upload, Trash2, Search, Table, RefreshCw } from 'lucide-react';
+import { FixedSizeList as List } from 'react-window';
 import { mlEngine } from '../services/MLEngine';
 
 export function DataView({ onLoad, onSave, onDeleteSample }) {
@@ -46,14 +47,67 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
         }
     };
 
-    const filteredSamples = samples.filter(s => {
-        const matchesSearch = s.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            s.valPreview.includes(searchQuery);
-        const matchesClass = selectedClass === 'all' || s.label === selectedClass;
-        return matchesSearch && matchesClass;
-    });
+    // PERFORMANCE: Memoize filtered samples to avoid recalculating on every render
+    const filteredSamples = useMemo(() => {
+        return samples.filter(s => {
+            const matchesSearch = s.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                s.valPreview.includes(searchQuery);
+            const matchesClass = selectedClass === 'all' || s.label === selectedClass;
+            return matchesSearch && matchesClass;
+        });
+    }, [samples, searchQuery, selectedClass]);
 
     const uniqueClasses = Array.from(new Set(samples.map(s => s.label)));
+
+    // Row renderer for virtual scrolling
+    const Row = ({ index, style }) => {
+        const sample = filteredSamples[index];
+
+        return (
+            <div style={style} className="group hover:bg-[#0F0F0F] transition-colors border-b border-[#1A1A1A] flex items-center px-6">
+                {/* Preview */}
+                <div className="w-32 py-4 pr-6">
+                    {sample.thumbnail ? (
+                        <div className="w-24 h-16 rounded-lg border border-[#222] overflow-hidden bg-black flex items-center justify-center group-hover:border-zinc-700 transition-all shadow-lg group-hover:shadow-blue-500/5">
+                            <img src={sample.thumbnail} className="w-full h-full object-cover" alt={`Sample ${sample.id}`} />
+                        </div>
+                    ) : (
+                        <div className="w-24 h-16 rounded-lg border border-[#222] border-dashed flex items-center justify-center text-[10px] font-mono text-zinc-700 bg-[#050505]">
+                            NO IMG
+                        </div>
+                    )}
+                </div>
+
+                {/* ID */}
+                <div className="w-20 py-4 pr-6 text-xs font-mono text-zinc-500">
+                    #{sample.id.toString().padStart(3, '0')}
+                </div>
+
+                {/* Label */}
+                <div className="flex-1 py-4 pr-6">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-zinc-900 text-zinc-300 border border-zinc-800 group-hover:border-zinc-700 group-hover:bg-zinc-800 transition-colors">
+                        {sample.label}
+                    </span>
+                </div>
+
+                {/* Features Preview */}
+                <div className="flex-1 py-4 pr-6 text-[10px] font-mono text-zinc-600 group-hover:text-zinc-500 truncate">
+                    [{sample.valPreview}...]
+                </div>
+
+                {/* Actions */}
+                <div className="w-20 py-4 text-right">
+                    <button
+                        onClick={() => handleDelete(sample.id)}
+                        className="text-zinc-600 hover:text-red-400 p-2 rounded-lg hover:bg-red-500/10 transition-all border border-transparent hover:border-red-500/20"
+                        title="Delete Sample"
+                    >
+                        <Trash2 size={14} />
+                    </button>
+                </div>
+            </div>
+        );
+    };
 
     return (
         <div className="h-full flex flex-col bg-[#0A0A0A] text-zinc-300 animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
@@ -133,64 +187,33 @@ export function DataView({ onLoad, onSave, onDeleteSample }) {
                 </div>
             </div>
 
-            {/* Table Area */}
-            <div className="flex-1 overflow-auto bg-[#0A0A0A]">
-                <table className="w-full text-left border-collapse">
-                    <thead className="sticky top-0 bg-[#0A0A0A] z-10 text-[10px] uppercase font-bold text-zinc-500 tracking-widest border-b border-[#222]">
-                        <tr>
-                            <th className="px-6 py-4 font-medium whitespace-nowrap w-32">Preview</th>
-                            <th className="px-6 py-4 font-medium whitespace-nowrap w-20">ID</th>
-                            <th className="px-6 py-4 font-medium whitespace-nowrap">Label</th>
-                            <th className="px-6 py-4 font-medium whitespace-nowrap text-zinc-600">Features</th>
-                            <th className="px-6 py-4 font-medium text-right whitespace-nowrap">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[#1A1A1A]">
-                        {filteredSamples.length > 0 ? (
-                            filteredSamples.map((sample) => (
-                                <tr key={sample.id} className="group hover:bg-[#0F0F0F] transition-colors">
-                                    <td className="px-6 py-4">
-                                        {sample.thumbnail ? (
-                                            <div className="w-24 h-16 rounded-lg border border-[#222] overflow-hidden bg-black flex items-center justify-center group-hover:border-zinc-700 transition-all shadow-lg group-hover:shadow-blue-500/5">
-                                                <img src={sample.thumbnail} className="w-full h-full object-cover" alt={`Sample ${sample.id}`} />
-                                            </div>
-                                        ) : (
-                                            <div className="w-24 h-16 rounded-lg border border-[#222] border-dashed flex items-center justify-center text-[10px] font-mono text-zinc-700 bg-[#050505]">
-                                                NO IMG
-                                            </div>
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-4 text-xs font-mono text-zinc-500">
-                                        #{sample.id.toString().padStart(3, '0')}
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-zinc-900 text-zinc-300 border border-zinc-800 group-hover:border-zinc-700 group-hover:bg-zinc-800 transition-colors">
-                                            {sample.label}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4 text-[10px] font-mono text-zinc-600 group-hover:text-zinc-500 truncate max-w-[200px]">
-                                        [{sample.valPreview}...]
-                                    </td>
-                                    <td className="px-6 py-4 text-right">
-                                        <button
-                                            onClick={() => handleDelete(sample.id)}
-                                            className="text-zinc-600 hover:text-red-400 p-2 rounded-lg hover:bg-red-500/10 transition-all border border-transparent hover:border-red-500/20"
-                                            title="Delete Sample"
-                                        >
-                                            <Trash2 size={14} />
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))
-                        ) : (
-                            <tr>
-                                <td colSpan={4} className="px-6 py-24 text-center text-zinc-700 italic text-xs">
-                                    No samples found. Record some data in the Training tab or Import a dataset.
-                                </td>
-                            </tr>
-                        )}
-                    </tbody>
-                </table>
+            {/* Virtual Scrolling Table Area */}
+            <div className="flex-1 overflow-hidden bg-[#0A0A0A]">
+                {/* Table Header */}
+                <div className="bg-[#0A0A0A] text-[10px] uppercase font-bold text-zinc-500 tracking-widest border-b border-[#222] flex items-center px-6 py-4">
+                    <div className="w-32 pr-6">Preview</div>
+                    <div className="w-20 pr-6">ID</div>
+                    <div className="flex-1 pr-6">Label</div>
+                    <div className="flex-1 pr-6 text-zinc-600">Features</div>
+                    <div className="w-20 text-right">Actions</div>
+                </div>
+
+                {/* Virtual Scrolling List */}
+                {filteredSamples.length > 0 ? (
+                    <List
+                        height={window.innerHeight - 350} // Adjust based on header/toolbar height
+                        itemCount={filteredSamples.length}
+                        itemSize={88} // Row height in pixels
+                        width="100%"
+                        className="scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent"
+                    >
+                        {Row}
+                    </List>
+                ) : (
+                    <div className="px-6 py-24 text-center text-zinc-700 italic text-xs">
+                        No samples found. Record some data in the Training tab or Import a dataset.
+                    </div>
+                )}
             </div>
         </div>
     );

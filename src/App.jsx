@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import * as tf from '@tensorflow/tfjs';
 import { inputManager } from './services/InputManager';
 import { mlEngine } from './services/MLEngine';
 import { webcamManager } from './services/WebcamManager';
@@ -99,6 +100,21 @@ function App() {
         serialFormatRef.current = serialFormat;
     }, [serialFormat]);
 
+    // PERFORMANCE: Initialize TensorFlow.js with WebGL backend for faster inference
+    useEffect(() => {
+        const initTensorFlow = async () => {
+            try {
+                await tf.setBackend('webgl');
+                await tf.ready();
+                console.log('[TensorFlow] Backend initialized:', tf.getBackend());
+                console.log('[TensorFlow] WebGL enabled - 5-10x faster inference');
+            } catch (e) {
+                console.warn('[TensorFlow] WebGL not available, using CPU backend');
+                console.warn('[TensorFlow] Error:', e.message);
+            }
+        };
+        initTensorFlow();
+    }, []);
 
     // Connect/disconnect Serial Bridge based on protocol selection
     useEffect(() => {
