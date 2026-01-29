@@ -60,4 +60,10 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
         run: |
           npm run build
-          npx electron-builder --publish always
+          if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            npx electron-builder --publish always --arm64
+          elif [[ "${{ matrix.os }}" == "macos-15-intel" ]]; then
+            npx electron-builder --publish always --x64
+          else
+            npx electron-builder --publish always
+          fi
