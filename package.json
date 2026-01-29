@@ -1,6 +1,6 @@
 {
     "name": "ml-bridge",
-    "version": "1.0.8",
+    "version": "1.0.9",
     "description": "Universal Machine Learning Hub for Serial Bridge",
     "main": "electron/main.js",
     "repository": {
@@ -104,18 +104,10 @@
             },
             "target": [
                 {
-                    "target": "dmg",
-                    "arch": [
-                        "x64",
-                        "arm64"
-                    ]
+                    "target": "dmg"
                 },
                 {
-                    "target": "zip",
-                    "arch": [
-                        "x64",
-                        "arm64"
-                    ]
+                    "target": "zip"
                 }
             ]
         },
