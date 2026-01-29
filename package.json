@@ -1,6 +1,6 @@
 {
     "name": "ml-bridge",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "description": "Universal Machine Learning Hub for Serial Bridge",
     "main": "electron/main.js",
     "repository": {
@@ -93,10 +93,29 @@
             "entitlementsInherit": "electron/entitlements.mac.plist",
             "hardenedRuntime": true,
             "gatekeeperAssess": false,
+            "notarize": {
+                "teamId": "${env.APPLE_TEAM_ID}"
+            },
             "extendInfo": {
                 "NSCameraUsageDescription": "ML Bridge requires access to the camera for visual input and machine learning training.",
                 "NSMicrophoneUsageDescription": "ML Bridge requires access to the microphone."
-            }
+            },
+            "target": [
+                {
+                    "target": "dmg",
+                    "arch": [
+                        "x64",
+                        "arm64"
+                    ]
+                },
+                {
+                    "target": "zip",
+                    "arch": [
+                        "x64",
+                        "arm64"
+                    ]
+                }
+            ]
         },
         "win": {
             "target": "nsis",
