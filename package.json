@@ -58,6 +58,7 @@
     "build": {
         "appId": "com.irtizanasar.ml-bridge",
         "productName": "ML Bridge",
+        "afterSign": "./scripts/notarize.js",
         "files": [
             "dist/**/*",
             "electron/**/*",
@@ -94,7 +95,6 @@
             "entitlementsInherit": "electron/entitlements.mac.plist",
             "hardenedRuntime": true,
             "gatekeeperAssess": false,
-            "notarize": "./scripts/notarize.js",
             "extendInfo": {
                 "NSCameraUsageDescription": "ML Bridge requires access to the camera for visual input and machine learning training.",
                 "NSMicrophoneUsageDescription": "ML Bridge requires access to the microphone."
