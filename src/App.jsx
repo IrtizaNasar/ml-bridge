@@ -74,6 +74,7 @@ function App() {
     };
 
     const lastDataRef = useRef({});
+    const lastDataTimeRef = useRef(0); // Track timestamp of last received data
     const inputSourceRef = useRef(inputSource);
 
     // Feature Selection
@@ -91,14 +92,26 @@ function App() {
     const protocolRef = useRef(protocol);
     const targetDeviceIdRef = useRef(targetDeviceId);
 
-    // Sync refs with state
+    // Watchdog for Signal Health
+    const [hasSignal, setHasSignal] = useState(false);
+
+    // Sync refs
     useEffect(() => {
         protocolRef.current = protocol;
-    }, [protocol]);
-
-    useEffect(() => {
         targetDeviceIdRef.current = targetDeviceId;
-    }, [targetDeviceId]);
+    }, [protocol, targetDeviceId]);
+
+    // Cleanup & Status Watchdog
+    useEffect(() => {
+        const timer = setInterval(() => {
+            const isStale = (Date.now() - lastDataTimeRef.current) > 2000;
+            // Only update state if it changes to avoid re-renders
+            if (isStale && hasSignal) setHasSignal(false);
+            if (!isStale && !hasSignal && lastDataTimeRef.current > 0) setHasSignal(true);
+        }, 500); // Check every 500ms
+
+        return () => clearInterval(timer);
+    }, [hasSignal]);
 
     const [serialFormat, setSerialFormat] = useState('json'); // 'json' | 'csv'
     const serialFormatRef = useRef(serialFormat);
@@ -410,6 +423,7 @@ function App() {
         inputManager.onData(async (data) => {
             setIncomingData(data);
             lastDataRef.current = data;
+            lastDataTimeRef.current = Date.now(); // Update timestamp
 
             // Gesture Auto-Capture Logic
             if (trainingConfigRef.current.autoCapture && recordingClassIdRef.current) {
@@ -499,7 +513,8 @@ function App() {
                             window.api.ws.broadcast('prediction', {
                                 ...result,
                                 protocol: protocolRef.current,
-                                deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null
+                                deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
+                                serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
                             });
                         }
                     }
@@ -520,7 +535,8 @@ function App() {
                                 window.api.ws.broadcast('prediction', {
                                     ...result,
                                     protocol: protocolRef.current,
-                                    deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null
+                                    deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
+                                    serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
                                 });
                             }
                         }
@@ -545,7 +561,8 @@ function App() {
                             window.api.ws.broadcast('prediction', {
                                 ...result,
                                 protocol: protocolRef.current,
-                                deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null
+                                deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
+                                serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
                             });
                         }
 
@@ -583,7 +600,16 @@ function App() {
     const trainFrame = (id, targetValue = null) => {
         if (lastError) setLastError(null); // Clear error on new action
 
-        if (lastError) setLastError(null); // Clear error on new action
+        // Check for stale data (older than 2 seconds)
+        const isStale = (Date.now() - lastDataTimeRef.current) > 2000;
+
+        // Exception: 'upload' source is static, never stale
+        if (inputSource !== 'upload' && isStale) {
+            console.warn('[App] trainFrame ignored: Data is stale (No signal)');
+            // Optionally trigger a UI warning here via setLastError?
+            // setLastError("No Signal: Cannot Train"); 
+            return;
+        }
 
         if (Object.keys(lastDataRef.current).length === 0) {
             console.warn('[App] trainFrame ignored: No incoming data in lastDataRef');
@@ -866,6 +892,7 @@ function App() {
     };
 
     // --- Data Import/Export Handlers ---
+    // --- Data Import/Export Handlers ---
     const handleSaveData = async () => {
         try {
             // Create map for ID -> Name resolution
@@ -874,10 +901,38 @@ function App() {
                 return acc;
             }, {});
 
-            console.log('[App] Exporting for Arduino Check...');
-            // Check if exportModelArduino exists (it might throw if not implemented)
-            await mlEngine.exportModelArduino(classNameMap);
+            const data = mlEngine.exportData(classNameMap);
+            const jsonString = JSON.stringify(data, null, 2);
 
+            if (window.api && window.api.file) {
+                const result = await window.api.file.saveDataset(jsonString);
+                if (result.success) {
+                    console.log('[App] Dataset saved successfully:', result.filePath);
+                } else if (!result.canceled) {
+                    console.error('[App] Failed to save dataset:', result.error);
+                    setLastError('Failed to save dataset: ' + (result.error || 'Unknown error'));
+                }
+            } else {
+                console.error('[App] File API not available');
+                setLastError('File API not available. Are you running in Electron?');
+            }
+        } catch (e) {
+            console.error('[App] Save error:', e);
+            setLastError('Failed to save dataset: ' + e.message);
+        }
+    };
+
+    // --- Arduino Export Handler ---
+    const handleExportArduino = async () => {
+        try {
+            // Create map for ID -> Name resolution
+            const classNameMap = classes.reduce((acc, cls) => {
+                acc[cls.id] = cls.name;
+                return acc;
+            }, {});
+
+            console.log('[App] Exporting for Arduino Check...');
+            await mlEngine.exportModelArduino(classNameMap);
         } catch (e) {
             console.error('[App] Arduino export failed:', e);
             setLastError(e.message || "Arduino export failed");
@@ -961,6 +1016,7 @@ function App() {
         <div className="h-screen w-screen overflow-hidden bg-[#050505]">
             <ErrorBoundary>
                 <ConceptDashboard
+                    hasSignal={hasSignal}
                     classes={classes}
                     setClasses={setClasses}
                     outputs={outputs}

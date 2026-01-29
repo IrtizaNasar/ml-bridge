@@ -292,6 +292,58 @@ void processData(String data) {
 }
 ```
 
+**USB Serial Sketch (Regression)** ([`arduino_serial_regression.ino`](arduino_serial_regression.ino)):
+Controls an LED brightness (PWM) based on "out_1" value.
+```cpp
+const int LED_PIN = 3; // Must be PWM pin (3, 5, 6, 9, 10, 11 on Uno)
+String receivedData = "";
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_PIN, OUTPUT);
+}
+
+void loop() {
+  while (Serial.available() > 0) {
+    char c = Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (receivedData.length() > 0) {
+        processData(receivedData);
+        receivedData = "";
+      }
+    } else {
+      receivedData += c;
+    }
+  }
+}
+
+void processData(String data) {
+  data.trim();
+  float value = 0.0;
+  bool found = false;
+
+  // JSON: {"out_1":0.75}
+  if (data.indexOf("out_1") >= 0) {
+    int key = data.indexOf("out_1") + 7; // after "out_1":
+    if (data.charAt(key) == '"') key++; // skip quote if present
+    if (data.charAt(key) == ':') key++;
+    value = data.substring(key).toFloat();
+    found = true;
+  }
+  // CSV: 0.75
+  else if (data.length() > 0 && (data.charAt(0) >= '0' && data.charAt(0) <= '9')) {
+    value = data.toFloat();
+    found = true;
+  }
+
+  if (found) {
+    if (value < 0) value = 0;
+    if (value > 1) value = 1;
+    analogWrite(LED_PIN, (int)(value * 255));
+  }
+}
+```
+
 **Bluetooth Sketch** ([`arduino_bluetooth_led_control.ino`](arduino_bluetooth_led_control.ino)):
 ```cpp
 #include <ArduinoBLE.h>

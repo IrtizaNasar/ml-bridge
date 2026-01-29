@@ -171,7 +171,10 @@ class WebcamManager {
     stop() {
         if (!this.isActive) return;
         this.isActive = false;
-        if (this.frameId) cancelAnimationFrame(this.frameId);
+        if (this.frameId) {
+            cancelAnimationFrame(this.frameId);
+            this.frameId = null;
+        }
         this.onDataCallback = null;
 
         if (this.stream) {

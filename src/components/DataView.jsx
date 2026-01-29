@@ -3,7 +3,7 @@ import { Database, Filter, Download, Upload, Trash2, Search, Table, RefreshCw } 
 import { UI_CONSTANTS } from '../constants';
 
 export function DataView({ onLoad, onSave, onDeleteSample, classes = [], engine }) {
-    const [samples, setSamples] = useState([]);
+    const [allSamples, setAllSamples] = useState([]);
 
     // Create a map for fast ID -> Name lookup
     const classNameMap = useMemo(() => {
@@ -12,15 +12,18 @@ export function DataView({ onLoad, onSave, onDeleteSample, classes = [], engine 
             return acc;
         }, {});
     }, [classes]);
+
     const [stats, setStats] = useState({ totalContexts: 0, totalSamples: 0, classes: 0 });
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedClass, setSelectedClass] = useState('all');
     const [isLoading, setIsLoading] = useState(false);
+    const [deletingId, setDeletingId] = useState(null); // Visual feedback state
+    const [isProcessing, setIsProcessing] = useState(false); // Global lock to prevent delete race conditions
 
     // Load data from memory on mount
     useEffect(() => {
         refreshData();
-    }, []);
+    }, [classes, engine?.denseData]);
 
     const refreshData = () => {
         setIsLoading(true);
@@ -42,7 +45,8 @@ export function DataView({ onLoad, onSave, onDeleteSample, classes = [], engine 
                         : (classNameMap[rawLabel] || rawLabel);
 
                     return {
-                        id: i,
+                        // Ensure unique ID for valid keys - if id is missing/duplicate, fall back to index
+                        id: d.id !== undefined ? d.id : i,
                         label: displayLabel,
                         type: d.type || 'classification',
                         features: d.features?.length || 0,
@@ -56,12 +60,12 @@ export function DataView({ onLoad, onSave, onDeleteSample, classes = [], engine 
                 }
             }).filter(Boolean);
 
-            setSamples(formatted);
+            setAllSamples(formatted);
 
             setStats({
                 totalSamples: formatted.length,
-                classes: new Set(rawData.map(s => s.label)).size,
-                inputDim: formatted.length > 0 ? (rawData[0]?.features?.length || 0) : 0
+                classes: new Set(formatted.map(s => s.label)).size,
+                inputDim: formatted.length > 0 ? (formatted[0]?.features || 0) : 0
             });
         } catch (e) {
             console.error("DataView refresh failed:", e);
@@ -69,19 +73,31 @@ export function DataView({ onLoad, onSave, onDeleteSample, classes = [], engine 
         setTimeout(() => setIsLoading(false), 300);
     };
 
-    const handleDelete = (index) => {
+    const handleDelete = async (idToDelete) => {
+        if (isProcessing) return;
+        setIsProcessing(true);
+        console.log("[DataView] Deleting sample:", idToDelete);
+
+        // Trigger animation
+        setDeletingId(idToDelete);
+        await new Promise(r => setTimeout(r, 200)); // 200ms fade out
+
         if (onDeleteSample) {
-            onDeleteSample(index);
-            refreshData(); // Refresh UI after delete
+            onDeleteSample(idToDelete);
+            // Refresh auto-happens via useEffect
+            setTimeout(() => refreshData(), 50);
         }
+        setDeletingId(null);
+        setIsProcessing(false);
     };
 
     // PERFORMANCE: Memoize filtered samples to avoid recalculating on every render
     const filteredSamples = useMemo(() => {
-        return samples.filter(s => {
+        return allSamples.filter(s => {
             if (!s) return false;
             try {
-                const matchesSearch = (s.label || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                const matchesSearch = s.id.toString().includes(searchQuery) ||
+                    (s.label || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
                     (s.valPreview || '').includes(searchQuery);
                 const matchesClass = selectedClass === 'all' || s.label === selectedClass;
                 return matchesSearch && matchesClass;
@@ -89,16 +105,26 @@ export function DataView({ onLoad, onSave, onDeleteSample, classes = [], engine 
                 return false;
             }
         });
-    }, [samples, searchQuery, selectedClass]);
+    }, [allSamples, searchQuery, selectedClass]);
 
-    const uniqueClasses = Array.from(new Set(samples.map(s => s.label)));
+    const uniqueClasses = Array.from(new Set(allSamples.map(s => s.label)));
 
     // Row renderer for virtual scrolling
     const Row = ({ index, style }) => {
         const sample = filteredSamples[index];
 
+        if (!sample) {
+            console.warn("[DataView] Row rendered with undefined sample at index:", index);
+            return null;
+        }
+
+        const isDeleting = deletingId === sample.id;
+
         return (
-            <div style={style} className="group hover:bg-[#0F0F0F] transition-colors border-b border-[#1A1A1A] flex items-center px-6">
+            <div
+                style={style}
+                className={`group hover:bg-[#0F0F0F] transition-all duration-300 border-b border-[#1A1A1A] flex items-center px-6 ${isDeleting ? 'opacity-0 bg-red-900/20 translate-x-4' : ''}`}
+            >
                 {/* Preview */}
                 <div className="w-32 py-4 pr-6">
                     {sample.thumbnail ? (
@@ -129,14 +155,19 @@ export function DataView({ onLoad, onSave, onDeleteSample, classes = [], engine 
                     [{sample.valPreview}...]
                 </div>
 
-                {/* Actions */}
-                <div className="w-20 py-4 text-right">
+                <div className="w-20 py-4 text-right relative z-50">
                     <button
-                        onClick={() => handleDelete(sample.id)}
-                        className="text-zinc-600 hover:text-red-400 p-2 rounded-lg hover:bg-red-500/10 transition-all border border-transparent hover:border-red-500/20"
+                        type="button"
+                        onPointerUp={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            if (!isProcessing) handleDelete(sample.id);
+                        }}
+                        disabled={isDeleting || isProcessing}
+                        className={`inline-flex items-center justify-center text-zinc-600 hover:text-red-400 p-2 rounded-lg hover:bg-red-500/10 transition-all cursor-pointer hover:scale-110 active:scale-95 z-50 relative ${isDeleting ? 'animate-pulse text-red-500' : ''} ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
                         title="Delete Sample"
                     >
-                        <Trash2 size={14} />
+                        <Trash2 size={14} className="pointer-events-none" />
                     </button>
                 </div>
             </div>

@@ -974,6 +974,17 @@ class MLEngine {
     }
 
 
+    classes = new Set();
+
+    removeSample(index) {
+        if (index >= 0 && index < this.denseData.length) {
+            this.denseData.splice(index, 1);
+            this._rebuildKnnState();
+            return true;
+        }
+        return false;
+    }
+
     getClassCounts() {
         return this.classifier.getClassExampleCount();
     }

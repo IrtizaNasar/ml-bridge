@@ -72,7 +72,7 @@ function FeatureRow({ label, value, active, color, onClick }) {
     )
 }
 
-function ClassCard({ cls, prediction, onTrain, onRemove, onRename, engineType, onUpload, inputSource }) {
+function ClassCard({ cls, prediction, onTrain, onRemove, onRename, engineType, onUpload, inputSource, hasSignal }) {
     const isPredicted = prediction?.label === cls.id;
     const confidence = prediction?.confidences?.[cls.id] || 0;
     const [isRecording, setIsRecording] = useState(false);
@@ -213,22 +213,25 @@ function ClassCard({ cls, prediction, onTrain, onRemove, onRename, engineType, o
                     onMouseDown={startRecording}
                     onMouseUp={stopRecording}
                     onMouseLeave={stopRecording}
+                    disabled={!isUploadMode && !hasSignal}
                     className={`
                             w-full py-2 text-[10px] font-bold uppercase tracking-widest rounded border transition-all select-none
-                            ${isRecording
-                            ? 'bg-emerald-600 border-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)]'
-                            : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600'
+                            ${!isUploadMode && !hasSignal
+                            ? 'bg-red-500/10 border-red-500/20 text-red-500 cursor-not-allowed opacity-50'
+                            : isRecording
+                                ? 'bg-emerald-600 border-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)]'
+                                : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600'
                         }
                         `}
                 >
-                    {isRecording ? 'RECORDING' : (engineType === 'dense' ? 'HOLD TO REC' : 'HOLD TO TRAIN')}
+                    {!isUploadMode && !hasSignal ? 'NO SIGNAL' : isRecording ? 'RECORDING' : (engineType === 'dense' ? 'HOLD TO REC' : 'HOLD TO TRAIN')}
                 </button>
             )}
         </div>
     )
 }
 
-function RegressionCard({ output, prediction, onTrain, onRemove, onUpdateTarget, onUpload, inputSource }) {
+function RegressionCard({ output, prediction, onTrain, onRemove, onUpdateTarget, onUpload, inputSource, hasSignal }) {
     const [isRecording, setIsRecording] = useState(false);
     const [isDragOver, setIsDragOver] = useState(false); // New: Drag & Drop State
     const predictedValue = prediction?.regression?.[output.id];
@@ -385,15 +388,18 @@ function RegressionCard({ output, prediction, onTrain, onRemove, onUpdateTarget,
                         onMouseDown={startRecording}
                         onMouseUp={stopRecording}
                         onMouseLeave={stopRecording}
+                        disabled={!isUploadMode && !hasSignal}
                         className={`
                             w-full py-2 text-[10px] font-bold uppercase tracking-widest rounded border transition-all select-none
-                            ${isRecording
-                                ? 'bg-emerald-600 border-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)]'
-                                : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600'
+                            ${!isUploadMode && !hasSignal
+                                ? 'bg-red-500/10 border-red-500/20 text-red-500 cursor-not-allowed opacity-50'
+                                : isRecording
+                                    ? 'bg-emerald-600 border-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)]'
+                                    : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600'
                             }
                         `}
                     >
-                        {isRecording ? 'RECORDING' : 'Record Target'}
+                        {!isUploadMode && !hasSignal ? 'NO SIGNAL' : isRecording ? 'RECORDING' : 'Record Target'}
                     </button>
                 )}
             </div>
@@ -432,7 +438,8 @@ export function ConceptDashboard({
     protocol, setProtocol,
     targetDeviceId, setTargetDeviceId,
     serialFormat, setSerialFormat,
-    mlEngine // Receive singleton
+    mlEngine, // Receive singleton
+    hasSignal // Received from App
 }) {
     // Internal dashboard state (View switching)
     const [activeView, setActiveView] = useState('training'); // 'data' | 'training' | 'models' | 'deploy'
@@ -704,6 +711,7 @@ export function ConceptDashboard({
                                                 engineType={engineType}
                                                 onUpload={onUpload}
                                                 inputSource={inputSource}
+                                                hasSignal={hasSignal}
                                             />
                                         ))}
 
@@ -739,6 +747,7 @@ export function ConceptDashboard({
                                                 onUpdateTarget={(val) => onUpdateOutputTarget(out.id, val)}
                                                 inputSource={inputSource}
                                                 onUpload={onUpload}
+                                                hasSignal={hasSignal}
                                             />
                                         ))}
 
