@@ -93,6 +93,9 @@
             "entitlementsInherit": "electron/entitlements.mac.plist",
             "hardenedRuntime": true,
             "gatekeeperAssess": false,
+            "notarize": {
+                "teamId": "${env.APPLE_TEAM_ID}"
+            },
             "extendInfo": {
                 "NSCameraUsageDescription": "ML Bridge requires access to the camera for visual input and machine learning training.",
                 "NSMicrophoneUsageDescription": "ML Bridge requires access to the microphone."
