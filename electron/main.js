@@ -1,5 +1,13 @@
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, powerSaveBlocker } = require('electron');
 const path = require('path');
+const { autoUpdater } = require('electron-updater');
+const log = require('electron-log');
+
+// Configure logging
+autoUpdater.logger = log;
+autoUpdater.logger.transports.file.level = 'info';
+log.info('App starting...');
+
 const isDev = process.env.NODE_ENV === 'development';
 
 let mainWindow;
@@ -17,6 +25,7 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js'),
+            backgroundThrottling: false,
         },
         // Icon path will be added later
     });
@@ -44,6 +53,17 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+    // Prevent App Nap/Suspension
+    powerSaveBlocker.start('prevent-app-suspension');
+
+    createWindow();
+
+    // Check for updates
+    if (!isDev) {
+        log.info('Checking for updates...');
+        autoUpdater.checkForUpdatesAndNotify();
+    }
+
     startWebSocketServer();
     createWindow();
 

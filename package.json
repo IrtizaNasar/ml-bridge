@@ -1,6 +1,6 @@
 {
     "name": "ml-bridge",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "description": "Universal Machine Learning Hub for Serial Bridge",
     "main": "electron/main.js",
     "repository": {
@@ -29,6 +29,8 @@
         "@tensorflow/tfjs": "^4.22.0",
         "clsx": "^2.1.0",
         "electron-fetch": "^1.9.1",
+        "electron-log": "^5.4.3",
+        "electron-updater": "^6.7.3",
         "express": "^5.2.1",
         "framer-motion": "^11.18.2",
         "jszip": "^3.10.1",
