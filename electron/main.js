@@ -56,8 +56,6 @@ app.whenReady().then(() => {
     // Prevent App Nap/Suspension
     powerSaveBlocker.start('prevent-app-suspension');
 
-    createWindow();
-
     // Check for updates
     if (!isDev) {
         log.info('Checking for updates...');

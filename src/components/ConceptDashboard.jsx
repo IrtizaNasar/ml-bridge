@@ -582,7 +582,7 @@ export function ConceptDashboard({
                                 const regularEntries = [];
 
                                 Object.entries(incomingData || {}).forEach(([key, val]) => {
-                                    if (inputSource === 'webcam' && key.startsWith('f') && /^f\d+$/.test(key)) {
+                                    if ((inputSource === 'webcam' || inputSource === 'upload') && key.startsWith('f') && /^f\d+$/.test(key)) {
                                         embeddingEntries.push([key, val]);
                                     } else {
                                         regularEntries.push([key, val]);
@@ -648,7 +648,9 @@ export function ConceptDashboard({
                                 );
                             })()}
                             {Object.keys(incomingData || {}).length === 0 && (
-                                <div className="text-xs text-zinc-600 p-4 text-center italic">Waiting for Signal...</div>
+                                <div className="text-xs text-zinc-600 p-4 text-center italic">
+                                    {inputSource === 'upload' ? 'Upload Test Image to View features' : 'Waiting for Signal...'}
+                                </div>
                             )}
                         </div>
                     </div>

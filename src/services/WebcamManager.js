@@ -1,5 +1,5 @@
 import * as mobilenet from '@tensorflow-models/mobilenet';
-import '@tensorflow/tfjs';
+import * as tf from '@tensorflow/tfjs';
 
 class WebcamManager {
     constructor() {
@@ -26,6 +26,75 @@ class WebcamManager {
         this.streamCallbacks.forEach(cb => cb(this.stream));
     }
 
+    async ensureModelLoaded() {
+        if (this.model) return;
+        if (this.isModelLoading) {
+            // Wait for existing load
+            while (this.isModelLoading) {
+                await new Promise(r => setTimeout(r, 100));
+            }
+            if (this.model) return;
+        }
+
+        this.isModelLoading = true;
+        let attempts = 0;
+        const maxAttempts = 5;
+
+        console.log('[WebcamManager] Initializing TensorFlow backend...');
+        try {
+            await tf.setBackend('webgl');
+            console.log('[WebcamManager] Backend set to WebGL');
+        } catch (e) {
+            console.warn('[WebcamManager] WebGL Failed, falling back to CPU:', e);
+            await tf.setBackend('cpu');
+            console.log('[WebcamManager] Backend set to CPU');
+        }
+
+        console.log('[WebcamManager] Loading MobileNet...');
+
+        while (attempts < maxAttempts && !this.model) {
+            try {
+                const attemptNum = attempts + 1;
+                console.log(`[WebcamManager] Loading MobileNet (attempt ${attemptNum}/${maxAttempts})...`);
+
+                // Load local model with timeout
+                this.model = await Promise.race([
+                    mobilenet.load({
+                        version: 2,
+                        alpha: 1.0,
+                        modelUrl: './models/mobilenet/model.json'
+                    }),
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error('Timeout')), 30000) // 30s timeout
+                    )
+                ]);
+
+                console.log('[WebcamManager] ✓ MobileNet loaded successfully');
+                break; // Success!
+
+            } catch (err) {
+                attempts++;
+                const isLastAttempt = attempts >= maxAttempts;
+
+                console.error(`[WebcamManager] ✗ MobileNet load failed (attempt ${attempts}/${maxAttempts}):`, err.message);
+
+                if (!isLastAttempt) {
+                    // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+                    const delay = Math.min(1000 * Math.pow(2, attempts - 1), 16000);
+                    console.log(`[WebcamManager] Retrying in ${delay / 1000}s...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                } else {
+                    this.isModelLoading = false;
+                    throw new Error(
+                        `Failed to load MobileNet after ${maxAttempts} attempts. ` +
+                        `Please check your internet connection and refresh the page.`
+                    );
+                }
+            }
+        }
+        this.isModelLoading = false;
+    }
+
     async start(callback) {
         // Always update callback, even if already running
         this.onDataCallback = callback;
@@ -34,61 +103,7 @@ class WebcamManager {
 
         try {
             // STEP 1: Load MobileNet FIRST (before camera)
-            // This ensures features are always available before user can record data
-            if (!this.model && !this.isModelLoading) {
-                this.isModelLoading = true;
-                let attempts = 0;
-                const maxAttempts = 5;
-
-                console.log('[WebcamManager] Loading MobileNet before starting camera...');
-
-                while (attempts < maxAttempts && !this.model) {
-                    try {
-                        const attemptNum = attempts + 1;
-                        console.log(`[WebcamManager] Loading MobileNet (attempt ${attemptNum}/${maxAttempts})...`);
-
-                        // Load local model with timeout
-                        this.model = await Promise.race([
-                            mobilenet.load({
-                                version: 2,
-                                alpha: 1.0,
-                                modelUrl: './models/mobilenet/model.json'
-                            }),
-                            new Promise((_, reject) =>
-                                setTimeout(() => reject(new Error('Timeout')), 30000) // 30s timeout
-                            )
-                        ]);
-
-                        console.log('[WebcamManager] ✓ MobileNet loaded successfully');
-                        break; // Success!
-
-                    } catch (err) {
-                        attempts++;
-                        const isLastAttempt = attempts >= maxAttempts;
-
-                        console.error(`[WebcamManager] ✗ MobileNet load failed (attempt ${attempts}/${maxAttempts}):`, err.message);
-
-                        if (!isLastAttempt) {
-                            // Exponential backoff: 1s, 2s, 4s, 8s, 16s
-                            const delay = Math.min(1000 * Math.pow(2, attempts - 1), 16000);
-                            console.log(`[WebcamManager] Retrying in ${delay / 1000}s...`);
-                            await new Promise(resolve => setTimeout(resolve, delay));
-                        } else {
-                            this.isModelLoading = false;
-                            throw new Error(
-                                `Failed to load MobileNet after ${maxAttempts} attempts. ` +
-                                `Please check your internet connection and refresh the page.`
-                            );
-                        }
-                    }
-                }
-                this.isModelLoading = false;
-            }
-
-            // Verify model loaded before proceeding
-            if (!this.model) {
-                throw new Error('MobileNet model failed to load. Cannot start webcam.');
-            }
+            await this.ensureModelLoaded();
 
             console.log('[WebcamManager] MobileNet ready, initializing camera...');
 
@@ -169,10 +184,12 @@ class WebcamManager {
     }
 
     stop() {
-        if (!this.isActive) return;
+        // Always try to stop stream/tracks even if flag says inactive
+        // if (!this.isActive) return; 
+
         this.isActive = false;
         if (this.frameId) {
-            cancelAnimationFrame(this.frameId);
+            clearTimeout(this.frameId);
             this.frameId = null;
         }
         this.onDataCallback = null;
@@ -221,7 +238,27 @@ class WebcamManager {
             }
         }
 
-        this.frameId = requestAnimationFrame(() => this.loop());
+        // Use setTimeout instead of requestAnimationFrame for background stability
+        // ~30fps = 33ms
+        this.frameId = setTimeout(() => this.loop(), 33);
+    }
+
+
+    async infer(imageElement) {
+        // Ensure model is loaded with retry logic
+        await this.ensureModelLoaded();
+
+        // Infer embeddings
+        const embedding = this.model.infer(imageElement, true);
+        const featuresData = embedding.dataSync();
+        embedding.dispose();
+
+        // Convert to labeled object format
+        const features = {};
+        for (let i = 0; i < featuresData.length; i++) {
+            features[`f${i}`] = featuresData[i];
+        }
+        return features;
     }
 }
 

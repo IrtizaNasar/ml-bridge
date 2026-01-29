@@ -512,6 +512,7 @@ function App() {
                         if (window.api && window.api.ws) {
                             window.api.ws.broadcast('prediction', {
                                 ...result,
+                                labelName: classes.find(c => c.id === result.label)?.name || result.label,
                                 protocol: protocolRef.current,
                                 deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
                                 serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
@@ -534,6 +535,7 @@ function App() {
                             if (window.api && window.api.ws) {
                                 window.api.ws.broadcast('prediction', {
                                     ...result,
+                                    labelName: classes.find(c => c.id === result.label)?.name || result.label,
                                     protocol: protocolRef.current,
                                     deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
                                     serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
@@ -824,11 +826,38 @@ function App() {
         try {
             const { features, thumbnail } = await inputManager.convertImageToFeatures(file);
 
+            // Update UI with features
+            setIncomingData(features);
+            lastDataRef.current = features;
+            lastDataTimeRef.current = Date.now();
+
             // Run Prediction
             if (engineType === 'dense') {
                 // Image upload - data is already normalized
                 const res = await mlEngine.predictDense(features, Object.keys(features), 'image');
-                setPrediction(res);
+
+                if (res) {
+                    setPrediction(res);
+                    const labelName = res.label
+                        ? (classes.find(c => c.id === res.label)?.name || res.label)
+                        : null;
+
+                    // Broadcast (OSC)
+                    if (window.api && window.api.osc && res.label) {
+                        window.api.osc.send('127.0.0.1', 12000, '/ml/classification', [res.label, labelName]);
+                    }
+
+                    // Broadcast (WS/Serial)
+                    if (window.api && window.api.ws) {
+                        window.api.ws.broadcast('prediction', {
+                            ...res,
+                            labelName: labelName,
+                            protocol: protocolRef.current,
+                            deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
+                            serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
+                        });
+                    }
+                }
             } else {
                 let res;
                 if (trainingMode === 'classification') {
@@ -836,7 +865,35 @@ function App() {
                 } else {
                     res = await mlEngine.predictRegression(features);
                 }
-                setPrediction(res);
+                // Add labelName for Consistent Output
+                if (res) {
+                    setPrediction(res);
+                    const labelName = trainingMode === 'classification' && res.label
+                        ? (classes.find(c => c.id === res.label)?.name || res.label)
+                        : null;
+
+                    // Broadcast (OSC)
+                    if (window.api && window.api.osc) {
+                        if (res.label) {
+                            window.api.osc.send('127.0.0.1', 12000, '/ml/classification', [res.label, labelName]);
+                        } else if (res.regression) {
+                            Object.entries(res.regression).forEach(([id, val]) => {
+                                window.api.osc.send('127.0.0.1', 12000, '/ml/regression', [id, val]);
+                            });
+                        }
+                    }
+
+                    // Broadcast (WS/Serial)
+                    if (window.api && window.api.ws) {
+                        window.api.ws.broadcast('prediction', {
+                            ...res,
+                            labelName: labelName,
+                            protocol: protocolRef.current,
+                            deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
+                            serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
+                        });
+                    }
+                }
             }
 
         } catch (e) {
