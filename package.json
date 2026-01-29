@@ -94,7 +94,9 @@
             "hardenedRuntime": true,
             "gatekeeperAssess": false,
             "notarize": {
-                "teamId": "${env.APPLE_TEAM_ID}"
+                "teamId": "${env.APPLE_TEAM_ID}",
+                "appleId": "${env.APPLE_ID}",
+                "appleIdPassword": "${env.APPLE_APP_SPECIFIC_PASSWORD}"
             },
             "extendInfo": {
                 "NSCameraUsageDescription": "ML Bridge requires access to the camera for visual input and machine learning training.",
