@@ -62,6 +62,18 @@ app.whenReady().then(() => {
         autoUpdater.checkForUpdatesAndNotify();
     }
 
+    autoUpdater.on('update-downloaded', (info) => {
+        log.info('Update downloaded');
+        dialog.showMessageBox({
+            type: 'info',
+            title: 'Update Ready',
+            message: `Version ${info.version} is ready. Restart now to apply?`,
+            buttons: ['Restart', 'Later']
+        }).then((returnValue) => {
+            if (returnValue.response === 0) autoUpdater.quitAndInstall();
+        });
+    });
+
     startWebSocketServer();
     createWindow();
 
