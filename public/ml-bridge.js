@@ -5,6 +5,8 @@
  * Uses Web Worker to prevent throttling when browser tab is hidden.
  * 
  * Usage:
+ *   <script src="http://localhost:3100/ml-bridge.js"></script>
+ *   
  *   const ml = new MLBridge();
  * 
  *   ml.onPrediction((data) => {
@@ -27,11 +29,14 @@ class MLBridge {
         this.predictionHandlers = [];
         this.statusHandlers = [];
 
-        // Initialize
-        this.connect();
+        // Initialize (async, but don't await in constructor)
+        this.connect().catch(err => {
+            console.error('[MLBridge] Connection failed:', err);
+            this._connectDirect();
+        });
     }
 
-    connect() {
+    async connect() {
         // Check if Web Workers are supported
         if (typeof Worker === 'undefined') {
             console.warn('[MLBridge] Web Workers not supported, falling back to direct connection');
@@ -41,8 +46,21 @@ class MLBridge {
 
         console.log(`[MLBridge] Starting worker connection to ${this.serverUrl}...`);
 
-        // Create worker
-        this.worker = new Worker('http://localhost:3100/ml-bridge-worker.js');
+        // Fetch worker code and create Blob URL to avoid cross-origin issues
+        try {
+            const workerUrl = `${this.serverUrl}/ml-bridge-worker.js`;
+            const response = await fetch(workerUrl);
+            const workerCode = await response.text();
+            const blob = new Blob([workerCode], { type: 'application/javascript' });
+            const blobUrl = URL.createObjectURL(blob);
+
+            this.worker = new Worker(blobUrl);
+        } catch (error) {
+            console.error('[MLBridge] Failed to load worker:', error);
+            console.log('[MLBridge] Falling back to direct connection');
+            this._connectDirect();
+            return;
+        }
 
         // Listen for messages from worker
         this.worker.addEventListener('message', (event) => {

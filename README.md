@@ -404,6 +404,7 @@ void loop() {
 ML Bridge runs a WebSocket server on `ws://localhost:3100`. It serves a helper library to make connection easy.
 
 **1. Include the Library**:
+
 Add this to your HTML file (before your own script):
 ```html
 <!-- Load Socket.IO -->
