@@ -31,7 +31,7 @@ export function InputCard({ incomingData, connectionStatus, isProMode, selectedF
 
             {/* Visualizer Area - Inset "Screen" Look */}
             <div className="p-4 pb-0">
-                <div className="h-40 bg-black/40 border border-white/5 rounded-xl relative overflow-hidden group shadow-inner">
+                <div className="min-h-[160px] bg-black/40 border border-white/5 rounded-xl relative group shadow-inner transition-all duration-300 ease-in-out">
                     {connectionStatus.source.includes('Webcam') ? (
                         <WebcamPreview />
                     ) : connectionStatus.source.includes('Image Upload') ? (

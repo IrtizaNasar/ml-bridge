@@ -533,7 +533,7 @@ export function ConceptDashboard({
 
                         {/* INPUT PREVIEW */}
                         {inputSource === 'webcam' ? (
-                            <div className="h-32 bg-black border border-[#222] rounded overflow-hidden relative">
+                            <div className="min-h-[128px] bg-black border border-[#222] rounded relative transition-all duration-300">
                                 <WebcamPreview />
                             </div>
                         ) : inputSource === 'upload' ? (

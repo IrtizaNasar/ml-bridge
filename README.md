@@ -138,6 +138,7 @@ npm run electron:build
 In the top header, select your data source:
 *   **SERIAL BRIDGE**: Auto-connects to the main app (port 3000) to receive sensor data.
 *   **WEBCAM**: Uses your camera. ML Bridge automatically crops and downsamples the image.
+    *   **Switch Camera**: Hover over the webcam preview and click the ⚙️ icon to select a different camera source.
 
 ### 2. Choose Your Mode
 *   **Classification**: "Discrete" states (e.g., Sitting, Standing, Jumping).

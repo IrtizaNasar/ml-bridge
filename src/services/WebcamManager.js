@@ -14,6 +14,7 @@ class WebcamManager {
         this.model = null;
         this.isModelLoading = false;
         this.streamCallbacks = new Set();
+        this.currentDeviceId = null;
     }
 
     onStreamUpdate(cb) {
@@ -118,9 +119,16 @@ class WebcamManager {
             document.body.appendChild(this.video);
 
             // Access Webcam
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { width: 224, height: 224, facingMode: 'user' }
-            });
+            const constraints = {
+                video: {
+                    width: 224,
+                    height: 224,
+                    facingMode: this.currentDeviceId ? undefined : 'user', // Default to user if no ID
+                    deviceId: this.currentDeviceId ? { exact: this.currentDeviceId } : undefined
+                }
+            };
+
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
             this.video.srcObject = stream;
             this.stream = stream;
 
@@ -259,6 +267,33 @@ class WebcamManager {
             features[`f${i}`] = featuresData[i];
         }
         return features;
+    }
+    async getDevices() {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            return devices.filter(device => device.kind === 'videoinput');
+        } catch (e) {
+            console.error('[WebcamManager] Error getting devices:', e);
+            return [];
+        }
+    }
+
+    async setDevice(deviceId) {
+        if (this.currentDeviceId === deviceId) return;
+
+        console.log(`[WebcamManager] Switching to device: ${deviceId}`);
+        this.currentDeviceId = deviceId;
+
+        // Restart if active
+        if (this.isActive) {
+            const currentCallback = this.onDataCallback; // Capture logic before stop wipes it
+            this.stop();
+            await this.start(currentCallback);
+        }
+    }
+
+    getCurrentDevice() {
+        return this.currentDeviceId;
     }
 }
 
