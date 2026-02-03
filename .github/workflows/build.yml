@@ -68,3 +68,5 @@ jobs:
           else
             npx electron-builder --publish always
           fi
+
+# Forced refresh for v1.1.1 trigger
