@@ -8,7 +8,7 @@ autoUpdater.logger = log;
 autoUpdater.logger.transports.file.level = 'info';
 log.info('App starting...');
 
-const isDev = process.env.NODE_ENV === 'development';
+const isDev = !app.isPackaged;
 
 let mainWindow;
 
@@ -26,6 +26,7 @@ function createWindow() {
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js'),
             backgroundThrottling: false,
+            additionalArguments: [`--ws-port=${wsPort}`]
         },
         // Icon path will be added later
     });
@@ -52,7 +53,7 @@ function createWindow() {
     });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
     // Prevent App Nap/Suspension
     powerSaveBlocker.start('prevent-app-suspension');
 
@@ -74,7 +75,10 @@ app.whenReady().then(() => {
         });
     });
 
-    startWebSocketServer();
+    // Start WS Server first to get the correct port
+    await startWebSocketServer();
+
+    // Now create window with the correct injected port
     createWindow();
 
     app.on('activate', () => {
@@ -97,29 +101,27 @@ const { Server: SocketIOServer } = require('socket.io');
 
 let wsServer = null;
 let io = null;
-const WS_PORT = 3100;
+let wsPort = 3100; // Will be updated if 3100 is busy
 
 function startWebSocketServer() {
-    try {
+    return new Promise((resolve) => {
         const expressApp = express();
         expressApp.use(express.json());
 
-        // Serve static files (client library)
-        // Access via: http://localhost:3100/ml-bridge.js
-        // Use app.getAppPath() for production compatibility
-        const publicPath = isDev
-            ? path.join(__dirname, '../public')
-            : path.join(process.resourcesPath, 'app.asar.unpacked/public');
-
-        expressApp.use(express.static(publicPath));
-
-        // CORS
+        // CORS - Must be BEFORE static files to apply to worker script
         expressApp.use((req, res, next) => {
             res.header('Access-Control-Allow-Origin', '*');
             res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
             res.header('Access-Control-Allow-Headers', 'Content-Type');
             next();
         });
+
+        // Serve static files (client library)
+        const publicPath = isDev
+            ? path.join(__dirname, '../public')
+            : path.join(process.resourcesPath, 'app.asar.unpacked/public');
+
+        expressApp.use(express.static(publicPath));
 
         const httpServer = http.createServer(expressApp);
         io = new SocketIOServer(httpServer, {
@@ -131,23 +133,34 @@ function startWebSocketServer() {
 
         io.on('connection', (socket) => {
             console.log('[WS] Client connected');
-
-            // Send initial status?
             socket.emit('status', { message: 'Connected to ML Bridge' });
-
             socket.on('disconnect', () => {
                 console.log('[WS] Client disconnected');
             });
         });
 
-        httpServer.listen(WS_PORT, '0.0.0.0', () => {
-            console.log(`[WS] Server running on http://localhost:${WS_PORT}`);
-        });
+        // Try to start server, with fallback ports if 3100 is busy
+        function tryStartServer(port, maxAttempts = 10) {
+            httpServer.listen(port, '0.0.0.0')
+                .on('listening', () => {
+                    wsPort = port;
+                    console.log(`[WS] ML Bridge Server running on http://localhost:${wsPort}`);
+                    wsServer = httpServer;
+                    resolve(wsPort);
+                })
+                .on('error', (err) => {
+                    if (err.code === 'EADDRINUSE' && maxAttempts > 1) {
+                        console.log(`[WS] Port ${port} is busy, trying ${port + 1}...`);
+                        tryStartServer(port + 1, maxAttempts - 1);
+                    } else {
+                        console.error('[WS] Failed to start server:', err);
+                        resolve(null); // Continue without server?
+                    }
+                });
+        }
 
-        wsServer = httpServer;
-    } catch (e) {
-        console.error('[WS] Failed to start server:', e);
-    }
+        tryStartServer(3100);
+    });
 }
 
 // IPC Handler to broadcast
@@ -159,14 +172,11 @@ ipcMain.handle('ws-broadcast', (event, channel, data) => {
         }
 
         // Debug: Log when serial protocol is detected
-        console.log('[WS-BROADCAST] Channel:', channel, 'Protocol:', data.protocol, 'DeviceId:', data.deviceId);
+        // console.log('[WS-BROADCAST] Channel:', channel, 'Protocol:', data.protocol, 'DeviceId:', data.deviceId);
 
         // If protocol is 'serial' and deviceId is provided, send to Serial Bridge
         if (data.protocol === 'serial' && data.deviceId) {
-            console.log('[WS-BROADCAST] Triggering Serial Bridge send to:', data.deviceId);
             sendToSerialBridge(data.deviceId, data);
-        } else {
-            console.log('[WS-BROADCAST] Not sending to Serial Bridge - protocol:', data.protocol, 'deviceId:', data.deviceId);
         }
 
         return { success: true };
@@ -183,7 +193,70 @@ const fetch = require('electron-fetch').default;
 let lastSerialSendTime = 0;
 let lastSentLabel = null; // Track last sent label for change detection
 const SERIAL_SEND_THROTTLE_MS = 500; // Send at most once per 500ms
+
+// Dynamic Serial Bridge URL (discovered via scan)
+let serialBridgeUrl = "http://localhost:3000";
+let serialBridgeConnected = false;
+
+// Scan for Serial Bridge on ports 3000-3010
+async function findSerialBridge() {
+    // console.log('[Discovery] Scanning for Serial Bridge...');
+    for (let port = 3000; port <= 3010; port++) {
+        try {
+            const url = `http://localhost:${port}`;
+            const res = await fetch(`${url}/api/health`, { timeout: 500 });
+            if (res.ok) {
+                const data = await res.json();
+                if (data.app === 'serial-bridge') {
+                    console.log(`[Discovery] Found Serial Bridge at ${url}`);
+                    serialBridgeUrl = url;
+                    serialBridgeConnected = true;
+
+                    // Notify frontend
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.webContents.send('serial-bridge-found', { url: serialBridgeUrl, port });
+                        mainWindow.webContents.send('serial-bridge-status', { connected: true, url: serialBridgeUrl });
+                    }
+                    return url;
+                }
+            }
+        } catch (e) {
+            // Ignore connection errors, just try next port
+        }
+    }
+    // console.log('[Discovery] Serial Bridge not found (yet).');
+    serialBridgeConnected = false;
+
+    // Notify frontend of failure
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('serial-bridge-status', { connected: false });
+    }
+    return null;
+}
+
+// Periodic scan if not connected
+setInterval(() => {
+    // Re-scan every 5 seconds if we haven't sent data successfully recently?
+    // Or just let the user retry manually?
+    // For now, let's scan if we think we are disconnected AND the user tries to connect?
+    // Actually, simple background scan is better.
+    findSerialBridge();
+}, 5000);
+
+ipcMain.handle('scan-serial-bridge', async () => {
+    return await findSerialBridge();
+});
+
 async function sendToSerialBridge(deviceId, predictionData) {
+    // If we haven't found it yet, try one quick scan
+    if (!serialBridgeConnected) {
+        await findSerialBridge();
+        if (!serialBridgeConnected) {
+            console.warn('[Serial Bridge] Cannot send: Serial Bridge not found.');
+            return;
+        }
+    }
+
     // Detect prediction type
     const isRegression = predictionData.regression !== undefined;
     const isClassification = predictionData.label !== undefined;
@@ -196,10 +269,12 @@ async function sendToSerialBridge(deviceId, predictionData) {
     // Apply appropriate throttling
     if (isClassification) {
         // Classification: throttle by label change
-        if (predictionData.label === lastSentLabel) {
+        // Use labelName for comparison (human-readable name)
+        const currentLabel = predictionData.labelName || predictionData.label;
+        if (currentLabel === lastSentLabel) {
             return; // Skip - same prediction
         }
-        lastSentLabel = predictionData.label;
+        lastSentLabel = currentLabel;
         lastSerialSendTime = Date.now();
     } else if (isRegression) {
         // Regression: time-based throttle only (values change continuously)
@@ -216,14 +291,17 @@ async function sendToSerialBridge(deviceId, predictionData) {
 
         if (isClassification) {
             // Classification formatting
+            // Use labelName if available (human-readable), fallback to label (ID)
+            const label = predictionData.labelName || predictionData.label;
+
             if (predictionData.serialFormat === 'csv') {
                 // CSV: label,confidence
                 const confidence = predictionData.confidence || Math.max(...Object.values(predictionData.confidences || {}));
-                message = `${predictionData.label},${confidence.toFixed(2)}`;
+                message = `${label},${confidence.toFixed(2)}`;
             } else {
-                // JSON: {"label":"class_1","confidence":0.85}
+                // JSON: {"label":"Punch","confidence":0.85}
                 message = JSON.stringify({
-                    label: predictionData.label,
+                    label: label,
                     confidence: predictionData.confidence || Math.max(...Object.values(predictionData.confidences || {}))
                 });
             }
@@ -242,7 +320,8 @@ async function sendToSerialBridge(deviceId, predictionData) {
         console.log(`[Serial Bridge] Sending to ${deviceId} via HTTP:`, message.substring(0, 100));
 
         // Serial Bridge uses HTTP POST to /api/send
-        const response = await fetch('http://localhost:3000/api/send', {
+        // Use the dynamically discovered URL
+        const response = await fetch(`${serialBridgeUrl}/api/send`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -260,26 +339,32 @@ async function sendToSerialBridge(deviceId, predictionData) {
         }
     } catch (e) {
         console.error('[Serial Bridge] HTTP request error:', e.message);
+        // Force a re-scan next time
+        serialBridgeConnected = false;
     }
 }
 
 // IPC Handlers for Serial Bridge connection management
 ipcMain.handle('serial-bridge-connect', () => {
-    console.log('[Serial Bridge] Connection check - Serial Bridge uses HTTP, no persistent connection needed');
-    return { success: true, message: 'Serial Bridge uses HTTP POST, no connection required' };
+    // Force a scan
+    findSerialBridge();
+    return { success: true, message: 'Scanning for Serial Bridge...' };
 });
 
 ipcMain.handle('serial-bridge-disconnect', () => {
-    console.log('[Serial Bridge] Disconnect called - Serial Bridge uses HTTP, nothing to disconnect');
+    // "Disconnect" just means stop trying to send? 
+    // For now, let's just say disconnected
+    serialBridgeConnected = false;
     return { success: true };
 });
 
 ipcMain.handle('serial-bridge-status', () => {
     return {
-        connected: true, // HTTP is stateless, always "connected"
-        url: 'http://localhost:3000/api/send'
+        connected: serialBridgeConnected,
+        url: serialBridgeConnected ? `${serialBridgeUrl}/api/send` : null
     };
 });
+
 
 // Universal Input Hub Placeholder
 ipcMain.handle('get-app-version', () => app.getVersion());

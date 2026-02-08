@@ -3,7 +3,7 @@ import {
     Activity, Network, Zap, Layout, LayoutGrid,
     Terminal, Play, Square,
     ChevronDown, Box, Download, Target,
-    Cable, Plus, Trash2, Settings,
+    Cable, Plus, Trash2, Settings, Filter,
     Cpu, Layers, Search, Keyboard,
     Save, FolderOpen, RotateCcw,
     Wifi, Video, Monitor,
@@ -438,6 +438,8 @@ export function ConceptDashboard({
     protocol, setProtocol,
     targetDeviceId, setTargetDeviceId,
     serialFormat, setSerialFormat,
+    messageTypeFilter, setMessageTypeFilter, // New: Message type filter for multi-stream devices
+    detectedMessageTypes, // Auto-detected message types
     mlEngine, // Receive singleton
     hasSignal // Received from App
 }) {
@@ -483,6 +485,27 @@ export function ConceptDashboard({
                                 { label: "OSC", action: () => setInputSource('osc') }
                             ]}
                         />
+
+
+                        {/* Message Type Filter (auto-appears when multi-stream data detected) */}
+                        {(inputSource === 'serial' || inputSource === 'osc') && detectedMessageTypes.size > 1 && (
+                            <>
+                                <div className="h-6 w-[1px] bg-[#222]"></div>
+                                <Dropdown
+                                    label="TYPE"
+                                    icon={<Filter size={12} />}
+                                    value={messageTypeFilter || 'ALL'}
+                                    options={[
+                                        { label: "ALL", action: () => setMessageTypeFilter(null) },
+                                        ...Array.from(detectedMessageTypes).map(type => ({
+                                            label: type.toUpperCase(),
+                                            action: () => setMessageTypeFilter(type)
+                                        }))
+                                    ]}
+                                />
+                            </>
+                        )}
+
 
                         <div className="h-6 w-[1px] bg-[#222]"></div>
 

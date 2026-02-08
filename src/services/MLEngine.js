@@ -605,6 +605,25 @@ class MLEngine {
         this.isTraining = false;
     }
 
+    /**
+     * Clears all training data and models
+     */
+    clearAll() {
+        this.classifier.clearAllClasses();
+        this.regressionData = {};
+        this.denseData = [];
+        this.classes.clear();
+        this.previousRegressionValues = {};
+        this.history = [];
+        this.predictionHistory = [];
+        this.lastStablePrediction = null;
+        this.denseModel = null;
+        this.denseModelType = null;
+        this.regressionOutputIds = null;
+
+        console.log('[MLEngine] All data and models cleared');
+    }
+
     // --- Utils ---
     _toTensor(inputData, selectedFeatures, dataType = 'auto') {
         let keys = [];
@@ -1043,7 +1062,12 @@ class MLEngine {
         const data = {
             classification: {},
             regression: {},
-            unifiedDataset: this.denseData // Persist the hub data
+            unifiedDataset: this.denseData, // Persist the hub data
+            metadata: {
+                classNames: classNameMap, // Save class ID -> Name mapping
+                exportedAt: new Date().toISOString(),
+                version: '1.0'
+            }
         };
 
         if (this.classifier.getNumClasses() > 0) {
@@ -1073,6 +1097,9 @@ class MLEngine {
 
         try {
             this.clearAll();
+
+            // Store imported metadata for UI reconstruction
+            this.importedMetadata = data.metadata || {};
 
             if (data.classification) {
                 const dataset = {};
@@ -1155,6 +1182,10 @@ class MLEngine {
         }
     }
 
+    // Get imported metadata (e.g., class names)
+    getImportedMetadata() {
+        return this.importedMetadata || {};
+    }
 
 
     async exportModelArduino(classNameMap = {}) {

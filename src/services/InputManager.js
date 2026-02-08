@@ -8,10 +8,52 @@ class InputManager {
         this.isConnected = false;
         this.dataCallbacks = [];
         this.statusCallbacks = [];
-        this.serialBridgeUrl = "http://localhost:3000";
         this.activeInputs = new Set();
 
+        // Debug Port Injection
+        if (window.api && window.api.getWsPort) {
+            console.log('[InputManager] getWsPort API exists. Value:', window.api.getWsPort());
+        } else {
+            console.log('[InputManager] getWsPort API MISSING. Using default.');
+        }
+
+        this.wsPort = (window.api && window.api.getWsPort) ? window.api.getWsPort() : 3100;
+        console.log('[InputManager] Initialized with WS Port:', this.wsPort);
+
         this.currentSource = 'serial'; // 'serial' | 'webcam' | 'upload'
+
+        // Listen for Serial Bridge discovery
+        if (window.api) {
+            window.api.on('serial-bridge-found', (data) => {
+                console.log('[InputManager] Serial Bridge found at:', data.url);
+                this.serialBridgeUrl = data.url;
+                if (this.currentSource === 'serial') {
+                    this._notifyStatus({ connected: true, source: `Serial Bridge (${data.port})` });
+                }
+            });
+
+            window.api.on('serial-bridge-status', (status) => {
+                if (status.connected) {
+                    this.serialBridgeUrl = status.url;
+                    if (this.currentSource === 'serial') {
+                        this._notifyStatus({ connected: true, source: 'Serial Bridge (Connected)' });
+                    }
+                } else {
+                    if (this.currentSource === 'serial') {
+                        this._notifyStatus({ connected: false, source: 'Searching for Serial Bridge...' });
+                    }
+                }
+            });
+
+            // Get initial configuration
+            // We assume the main process sends this, or we request it?
+            // Actually, we can just ask for status
+            window.api.serialBridge.status().then(status => {
+                if (status.connected) {
+                    this.serialBridgeUrl = status.url;
+                }
+            });
+        }
     }
 
     setSource(source) {
@@ -31,22 +73,46 @@ class InputManager {
         if (source === 'upload') this._notifyStatus({ connected: true, source: 'Image Upload Mode' });
 
         // Notify status
-        this._notifyStatus({ connected: false, source: source === 'serial' ? 'Connecting...' : 'Initializing...' });
+        if (source === 'serial') {
+            this._notifyStatus({ connected: false, source: 'Connecting to ML Bridge...' });
+        } else {
+            this._notifyStatus({ connected: false, source: 'Initializing...' });
+        }
     }
 
     // --- Serial Logic ---
-    connectSocket() {
+    async connectSocket() {
         if (this.socket) {
             if (this.socket.connected) return;
-            // If exists but disconnected, try to force it
             this.socket.connect();
             return;
         }
 
+        // 1. Check if we know where Serial Bridge is
+        if (!this.serialBridgeUrl) {
+            console.log('[InputManager] Serial Bridge URL unknown. Scanning...');
+            this._notifyStatus({ connected: false, source: 'Scanning for Serial Bridge...' });
 
+            if (window.api && window.api.scanSerialBridge) {
+                const foundUrl = await window.api.scanSerialBridge();
+                if (foundUrl) {
+                    this.serialBridgeUrl = foundUrl;
+                } else {
+                    this._notifyStatus({ connected: false, source: 'Serial Bridge Not Found' });
+                    return;
+                }
+            } else {
+                // Fallback for dev/browser mode
+                this.serialBridgeUrl = "http://localhost:3000";
+            }
+        }
+
+        console.log('[InputManager] Serial Bridge URL:', this.serialBridgeUrl);
+
+        // 2. Connect to Serial Bridge directly
         this.socket = io(this.serialBridgeUrl, {
             reconnection: true,
-            reconnectionAttempts: Infinity, // Keep trying
+            reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
             timeout: 5000
         });
@@ -54,7 +120,13 @@ class InputManager {
         this.socket.on("connect", () => {
 
             this.isConnected = true;
-            this._notifyStatus({ connected: true, source: 'Serial Bridge' });
+            // When connected to ML Bridge WS, we are "ready" to receive data
+            // But we might not be connected to Serial Bridge yet.
+            if (this.serialBridgeUrl) {
+                this._notifyStatus({ connected: true, source: 'Serial Bridge (Ready)' });
+            } else {
+                this._notifyStatus({ connected: false, source: 'Scanning for Serial Bridge...' });
+            }
         });
 
         this.socket.on("connect_error", (err) => {
@@ -65,7 +137,7 @@ class InputManager {
         this.socket.on("disconnect", (reason) => {
 
             this.isConnected = false;
-            this._notifyStatus({ connected: false, source: 'Serial Bridge (Disconnected)' });
+            this._notifyStatus({ connected: false, source: 'ML Bridge Disconnected' });
         });
 
         this.socket.on("serial-data", (payload) => {
@@ -224,15 +296,11 @@ class InputManager {
 
     _broadcastData(data) {
         if (data && typeof data === 'object') {
-            // Flatten numeric arrays (e.g. [940] -> 940)
-            const flattened = {};
-            Object.keys(data).forEach(k => {
-                const val = data[k];
-                if (Array.isArray(val) && val.length === 1 && typeof val[0] === 'number') {
-                    flattened[k] = val[0];
-                } else {
-                    flattened[k] = val;
-                }
+            // Recursively flatten nested objects and arrays
+            const flattened = this._flattenObject(data);
+
+            // Track active inputs
+            Object.keys(flattened).forEach(k => {
                 this.activeInputs.add(k);
             });
 
@@ -245,6 +313,64 @@ class InputManager {
                 }
             });
         }
+    }
+
+    _flattenObject(obj, prefix = '') {
+        const flattened = {};
+
+        Object.keys(obj).forEach(key => {
+            const value = obj[key];
+
+            // Skip timestamp and index metadata
+            if (key === 'timestamp' || key === 'index') {
+                return;
+            }
+
+            // Preserve 'type' field as-is for filtering
+            if (key === 'type' && typeof value === 'string') {
+                flattened.type = value;
+                return;
+            }
+
+            const newKey = prefix ? `${prefix}_${key}` : key;
+
+            if (value === null || value === undefined) {
+                // Skip null/undefined values
+                return;
+            }
+            else if (typeof value === 'number') {
+                // Direct numeric value
+                flattened[newKey] = value;
+            }
+            else if (Array.isArray(value)) {
+                if (value.length === 1 && typeof value[0] === 'number') {
+                    // Single-element numeric array -> flatten to scalar
+                    flattened[newKey] = value[0];
+                } else if (value.every(v => typeof v === 'number')) {
+                    // Multi-element numeric array -> index each element
+                    value.forEach((v, i) => {
+                        flattened[`${newKey}_${i}`] = v;
+                    });
+                }
+                // Skip non-numeric arrays
+            }
+            else if (typeof value === 'object') {
+                // Nested object -> recursively flatten
+                const nested = this._flattenObject(value, newKey);
+                Object.assign(flattened, nested);
+            }
+            else if (typeof value === 'string') {
+                // Try to parse string as number
+                const num = parseFloat(value);
+                if (!isNaN(num) && isFinite(num)) {
+                    flattened[newKey] = num;
+                }
+                // Otherwise skip non-numeric strings
+            }
+            // Skip other types (booleans, functions, etc.)
+        });
+
+        return flattened;
     }
 
     disconnect() {

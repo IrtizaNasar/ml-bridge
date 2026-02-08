@@ -92,6 +92,11 @@ function App() {
     const protocolRef = useRef(protocol);
     const targetDeviceIdRef = useRef(targetDeviceId);
 
+    // Message Type Filter (for multi-stream devices like Muse 2)
+    const [messageTypeFilter, setMessageTypeFilter] = useState(null); // null = no filter (default)
+    const messageTypeFilterRef = useRef(messageTypeFilter);
+    const [detectedMessageTypes, setDetectedMessageTypes] = useState(new Set()); // Auto-detect available types
+
     // Watchdog for Signal Health
     const [hasSignal, setHasSignal] = useState(false);
 
@@ -99,19 +104,33 @@ function App() {
     useEffect(() => {
         protocolRef.current = protocol;
         targetDeviceIdRef.current = targetDeviceId;
-    }, [protocol, targetDeviceId]);
+        messageTypeFilterRef.current = messageTypeFilter;
+    }, [protocol, targetDeviceId, messageTypeFilter]);
 
     // Cleanup & Status Watchdog
     useEffect(() => {
         const timer = setInterval(() => {
-            const isStale = (Date.now() - lastDataTimeRef.current) > 2000;
-            // Only update state if it changes to avoid re-renders
-            if (isStale && hasSignal) setHasSignal(false);
-            if (!isStale && !hasSignal && lastDataTimeRef.current > 0) setHasSignal(true);
-        }, 500); // Check every 500ms
+            const now = Date.now();
+            const elapsed = now - lastDataTimeRef.current;
+
+            // Mark as no signal if no data in 2s
+            if (elapsed > 2000) {
+                setHasSignal(false);
+
+                // Clear stale data when signal is lost
+                setIncomingData({});
+                lastDataRef.current = {};
+
+                // Reset detected message types when connection is lost
+                setDetectedMessageTypes(new Set());
+                setMessageTypeFilter(null); // Reset filter selection too
+            } else {
+                setHasSignal(true);
+            }
+        }, 500);
 
         return () => clearInterval(timer);
-    }, [hasSignal]);
+    }, []);
 
     const [serialFormat, setSerialFormat] = useState('json'); // 'json' | 'csv'
     const serialFormatRef = useRef(serialFormat);
@@ -119,6 +138,13 @@ function App() {
     useEffect(() => {
         serialFormatRef.current = serialFormat;
     }, [serialFormat]);
+
+    // Auto-reset filter when it becomes hidden (< 2 types)
+    useEffect(() => {
+        if (detectedMessageTypes.size < 2 && messageTypeFilter !== null) {
+            setMessageTypeFilter(null); // Reset to "ALL" when filter disappears
+        }
+    }, [detectedMessageTypes.size, messageTypeFilter]);
 
     // PERFORMANCE: Initialize TensorFlow.js with WebGL backend for faster inference
     useEffect(() => {
@@ -192,11 +218,27 @@ function App() {
         setInputSource(source);
         inputManager.setSource(source);
 
-        // Full Reset on Source Switch/Refresh
-        clearModel();
+        // Full Reset
         setIncomingData({});
+        lastDataRef.current = {};
         setSelectedFeatures(new Set());
         selectedFeaturesRef.current = new Set();
+        setHasSignal(false);
+
+        // Reset detected message types when switching input sources
+        setDetectedMessageTypes(new Set());
+        setMessageTypeFilter(null);
+
+        // Clear model and training data
+        mlEngine.clearAll();
+        setClasses([
+            { id: 'class_1', name: 'Class 1', count: 0 },
+            { id: 'class_2', name: 'Class 2', count: 0 },
+        ]);
+        setOutputs([
+            { id: 'out_1', name: 'Parameter 1', value: 0.5, samples: 0 }
+        ]);
+        setTrainingProgress(null);
 
         // Clear feature tracking
         lastSeenFeaturesRef.current.clear();
@@ -206,7 +248,7 @@ function App() {
         }
 
         setPrediction(null);
-        setTrainingProgress(null);
+        // setTrainingProgress(null); // This line is now redundant due to the above change
         setIsRunning(false);
         setIsTraining(false);
 
@@ -377,6 +419,7 @@ function App() {
                             if (window.api && window.api.ws) {
                                 window.api.ws.broadcast('prediction', {
                                     ...result,
+                                    labelName: classes.find(c => c.id === result.label)?.name || result.label,
                                     protocol: protocolRef.current,
                                     deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
                                     serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
@@ -421,6 +464,27 @@ function App() {
         inputManager.onStatus(setConnectionStatus);
 
         inputManager.onData(async (data) => {
+            // Auto-detect message types for dynamic filtering
+            if (data.type) {
+                setDetectedMessageTypes(prev => {
+                    if (!prev.has(data.type)) {
+                        return new Set([...prev, data.type]);
+                    }
+                    return prev;
+                });
+            }
+
+            // Optional filtering for multi-stream devices (e.g., Muse 2)
+            // Only filter if user has explicitly selected a message type
+            if (messageTypeFilterRef.current && data.type && data.type !== messageTypeFilterRef.current) {
+                console.log(`[Filter] Skipping ${data.type} (filter: ${messageTypeFilterRef.current})`);
+                return; // Skip messages that don't match selected type
+            }
+
+            if (messageTypeFilterRef.current && data.type) {
+                console.log(`[Filter] Accepting ${data.type} message`);
+            }
+
             setIncomingData(data);
             lastDataRef.current = data;
             lastDataTimeRef.current = Date.now(); // Update timestamp
@@ -447,6 +511,7 @@ function App() {
                     selectedFeaturesRef.current = newSet;
                 }
             }
+
 
             // Debounced feature cleanup: Remove inactive sensors after grace period
             // Only check every 2 seconds to avoid excessive updates
@@ -475,6 +540,7 @@ function App() {
                     }
                 }
             }, FEATURE_DETECTION.UPDATE_CHECK_INTERVAL_MS);
+
 
             // Predict (Only if Running)
             if (!isRunningRef.current) {
@@ -562,6 +628,7 @@ function App() {
                         if (window.api && window.api.ws) {
                             window.api.ws.broadcast('prediction', {
                                 ...result,
+                                labelName: classes.find(c => c.id === result.label)?.name || result.label,
                                 protocol: protocolRef.current,
                                 deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
                                 serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
@@ -965,17 +1032,23 @@ function App() {
                 const result = await window.api.file.saveDataset(jsonString);
                 if (result.success) {
                     console.log('[App] Dataset saved successfully:', result.filePath);
+                    return { success: true, filePath: result.filePath };
                 } else if (!result.canceled) {
                     console.error('[App] Failed to save dataset:', result.error);
                     setLastError('Failed to save dataset: ' + (result.error || 'Unknown error'));
+                    return { success: false, error: result.error };
                 }
+                return { success: false, canceled: true };
             } else {
-                console.error('[App] File API not available');
-                setLastError('File API not available. Are you running in Electron?');
+                const error = 'File API not available. Are you running in Electron?';
+                console.error('[App]', error);
+                setLastError(error);
+                return { success: false, error };
             }
         } catch (e) {
             console.error('[App] Save error:', e);
             setLastError('Failed to save dataset: ' + e.message);
+            return { success: false, error: e.message };
         }
     };
 
@@ -1002,69 +1075,86 @@ function App() {
                 const result = await window.api.file.loadDataset();
 
                 if (result.canceled) {
-                    return; // User canceled
+                    return { success: false, canceled: true };
                 }
 
                 if (result.success && result.content) {
-                    const data = JSON.parse(result.content);
-                    const imported = mlEngine.importData(data);
+                    // Show loading state for large datasets
+                    setIsTraining(true);
 
-                    if (imported) {
-                        // Rebuild UI state from loaded data
-                        const classCounts = mlEngine.getClassCounts();
-                        const regCounts = mlEngine.getRegressionCounts();
+                    // Use setTimeout to allow UI to update before heavy processing
+                    return new Promise((resolve) => {
+                        setTimeout(() => {
+                            try {
+                                const data = JSON.parse(result.content);
+                                const imported = mlEngine.importData(data);
 
-                        // Rebuild classes from loaded dataset
-                        const loadedClassIds = Object.keys(classCounts);
-                        const newClasses = loadedClassIds.map(classId => {
-                            // Check if class already exists in UI state
-                            const existing = classes.find(c => c.id === classId);
-                            return {
-                                id: classId,
-                                name: existing?.name || classId, // Preserve custom name if exists
-                                count: classCounts[classId] || 0
-                            };
-                        });
+                                if (imported) {
+                                    const metadata = mlEngine.getImportedMetadata();
+                                    const classNameMap = metadata.classNames || {};
 
-                        // Only keep classes that have data
-                        setClasses(newClasses.filter(c => c.count > 0));
+                                    const classCounts = mlEngine.getClassCounts();
+                                    const regCounts = mlEngine.getRegressionCounts();
 
-                        // Rebuild outputs from dataset
-                        const loadedOutputIds = Object.keys(regCounts);
-                        const newOutputs = loadedOutputIds.map(outputId => {
-                            const existing = outputs.find(o => o.id === outputId);
-                            return {
-                                id: outputId,
-                                name: existing?.name || outputId,
-                                value: existing?.value || 0.5, // Default value
-                                samples: regCounts[outputId] || 0
-                            };
-                        });
+                                    const loadedClassIds = Object.keys(classCounts);
+                                    const newClasses = loadedClassIds.map(classId => ({
+                                        id: classId,
+                                        name: classNameMap[classId] || classId,
+                                        count: classCounts[classId] || 0
+                                    }));
 
-                        // Only keep outputs that have data
-                        setOutputs(newOutputs.filter(o => o.samples > 0));
+                                    setClasses(newClasses.filter(c => c.count > 0));
 
-                        // Clear prediction and training state
-                        setPrediction(null);
-                        setTrainingProgress(null);
-                        setIsRunning(false);
+                                    const loadedOutputIds = Object.keys(regCounts);
+                                    const newOutputs = loadedOutputIds.map(outputId => {
+                                        const existing = outputs.find(o => o.id === outputId);
+                                        return {
+                                            id: outputId,
+                                            name: existing?.name || outputId,
+                                            value: existing?.value || 0.5,
+                                            samples: regCounts[outputId] || 0
+                                        };
+                                    });
 
-                        console.log('[App] Dataset loaded successfully');
-                        console.log(`[App] Loaded ${newClasses.length} classes, ${newOutputs.length} outputs`);
-                    } else {
-                        setLastError('Failed to import dataset. File may be corrupted.');
-                    }
+                                    setOutputs(newOutputs.filter(o => o.samples > 0));
+
+                                    setPrediction(null);
+                                    setTrainingProgress(null);
+                                    setIsRunning(false);
+                                    setIsTraining(false);
+
+                                    console.log('[App] Dataset loaded:', newClasses.length, 'classes');
+                                    resolve({ success: true });
+                                } else {
+                                    setIsTraining(false);
+                                    const error = 'Failed to import. File may be corrupted.';
+                                    setLastError(error);
+                                    resolve({ success: false, error });
+                                }
+                            } catch (parseError) {
+                                setIsTraining(false);
+                                console.error('[App] Parse error:', parseError);
+                                const error = 'Failed to parse dataset file.';
+                                setLastError(error);
+                                resolve({ success: false, error });
+                            }
+                        }, 50);
+                    });
                 } else {
                     console.error('[App] Failed to load dataset:', result.error);
-                    setLastError('Failed to load dataset: ' + (result.error || 'Unknown error'));
+                    const error = 'Failed to load dataset: ' + (result.error || 'Unknown error');
+                    setLastError(error);
+                    return { success: false, error };
                 }
             } else {
-                console.error('[App] File API not available');
-                setLastError('File API not available. Are you running in Electron?');
+                const error = 'File API not available. Are you running in Electron?';
+                setLastError(error);
+                return { success: false, error };
             }
         } catch (e) {
             console.error('[App] Load error:', e);
             setLastError('Failed to load dataset: ' + e.message);
+            return { success: false, error: e.message };
         }
     };
 
@@ -1120,6 +1210,9 @@ function App() {
                     setTargetDeviceId={setTargetDeviceId}
                     serialFormat={serialFormat}
                     setSerialFormat={setSerialFormat}
+                    messageTypeFilter={messageTypeFilter}
+                    setMessageTypeFilter={setMessageTypeFilter}
+                    detectedMessageTypes={detectedMessageTypes}
                     mlEngine={mlEngine} // Pass singleton to avoid import issues in children
                 />
             </ErrorBoundary>

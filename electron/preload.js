@@ -2,6 +2,12 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
     getVersion: () => ipcRenderer.invoke('get-app-version'),
+    // Retrieve dynamic WS port from command line args
+    getWsPort: () => {
+        const portArg = process.argv.find(arg => arg.startsWith('--ws-port='));
+        return portArg ? parseInt(portArg.split('=')[1]) : 3100;
+    },
+    scanSerialBridge: () => ipcRenderer.invoke('scan-serial-bridge'),
     // Add more IPC bridges here
     send: (channel, data) => {
         // Whitelist channels

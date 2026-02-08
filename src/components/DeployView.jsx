@@ -222,7 +222,7 @@ export function DeployView({
                                         <br />
                                         &nbsp;:: {prediction ? (
                                             trainingMode === 'classification'
-                                                ? `Sending "${prediction.label}"`
+                                                ? `Sending "${classNameMap[prediction.label] || prediction.label}"`
                                                 : `Sending values: ${Object.values(prediction.regression || {}).map(v => v.toFixed(2)).join(', ')}`
                                         ) : '...'}
                                     </div>
