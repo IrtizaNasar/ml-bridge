@@ -99,6 +99,17 @@ const express = require('express');
 const http = require('http');
 const { Server: SocketIOServer } = require('socket.io');
 
+// FOR OSC CRASHES
+process.on('uncaughtException', (err) => {
+    console.error('CRITICAL UNCAUGHT EXCEPTION:', err);
+    // If it's the known EADDRNOTAVAIL from node-osc, ignore it
+    if (err.code === 'EADDRNOTAVAIL') {
+        console.warn('Ignored EADDRNOTAVAIL (OSC Binding Issue). App will continue.');
+        return;
+    }
+
+});
+
 let wsServer = null;
 let io = null;
 let wsPort = 3100; // Will be updated if 3100 is busy
@@ -375,39 +386,64 @@ let oscServer = null;
 
 ipcMain.handle('osc-start', async (event, port = 12000) => {
     try {
+        // Close any existing server first
         if (oscServer) {
-            oscServer.close();
+            try { oscServer.close(); } catch (e) { }
             oscServer = null;
         }
 
         console.log(`[Main] Starting OSC Server on port ${port}...`);
-        oscServer = new Server(port, '0.0.0.0', () => {
-            console.log(`[Main] OSC Server is listening`);
-        });
 
-        oscServer.on('message', (msg) => {
-            // Parse Wekinator-style arguments
-            // msg format: [address, ...args]
+        const startServer = (host) => {
+            return new Promise((resolve, reject) => {
+                try {
+                    const server = new Server(port, host);
 
-            const args = msg.slice(1);
+                    server.on('listening', () => {
+                        console.log(`[Main] OSC Server is listening on ${host}:${port}`);
+                        resolve(server);
+                    });
 
-            // 1. Flatten arrays if any
-            const flatArgs = args.flat();
+                    server.on('message', (msg) => {
+                        const args = msg.slice(1);
+                        const flatArgs = args.flat();
+                        const numericArgs = flatArgs.filter(a => typeof a === 'number');
 
-            // 2. Filter for numbers only (ML inputs)
-            const numericArgs = flatArgs.filter(a => typeof a === 'number');
+                        if (numericArgs.length > 0) {
+                            const inputs = {};
+                            numericArgs.forEach((val, idx) => {
+                                inputs[`osc_${idx}`] = val;
+                            });
+                            if (mainWindow && !mainWindow.isDestroyed()) {
+                                mainWindow.webContents.send('osc-data', inputs);
+                            }
+                        }
+                    });
 
-            if (numericArgs.length > 0) {
-                const inputs = {};
-                numericArgs.forEach((val, idx) => {
-                    inputs[`osc_${idx}`] = val; // Simple mapping
-                });
-                // Send to Renderer
-                if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.webContents.send('osc-data', inputs);
+                    server.on('error', (err) => {
+                        if (!oscServer) {
+                            reject(err);
+                        } else {
+                            console.error(`[Main] OSC Server Error (${host}):`, err.message);
+                            if (err.code === 'EADDRINUSE') {
+                                try { server.close(); } catch (e) { }
+                                oscServer = null;
+                            }
+                        }
+                    });
+
+                } catch (e) {
+                    reject(e);
                 }
-            }
-        });
+            });
+        };
+
+        try {
+            oscServer = await startServer('0.0.0.0');
+        } catch (e) {
+            console.warn(`[Main] Failed to bind to 0.0.0.0 (${e.message}). Falling back to 127.0.0.1...`);
+            oscServer = await startServer('127.0.0.1');
+        }
 
         return { success: true, message: `Listening on port ${port}` };
 
