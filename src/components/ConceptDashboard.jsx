@@ -7,11 +7,12 @@ import {
     Cpu, Layers, Search, Keyboard,
     Save, FolderOpen, RotateCcw,
     Wifi, Video, Monitor,
-    Database, Send, History, Image // Imported new icons
+    Database, Send, History, Image, Lock // Imported new icons
 } from 'lucide-react';
 import { Visualizer } from './Visualizer'; // Import reusable Visualizer
 import { WebcamPreview } from './WebcamPreview';
 import { DataView } from './DataView'; // Import new Data Tab View
+import { ConfirmModal } from './ConfirmModal'; // Import ConfirmModal for feature lock warning
 
 import { DeployView } from './DeployView'; // Import Deploy/Monitor View
 
@@ -54,13 +55,17 @@ function getAccuracyValue(prediction) {
     }
 }
 
-function FeatureRow({ label, value, active, color, onClick }) {
+function FeatureRow({ label, value, active, color, onClick, locked }) {
     return (
         <div
             onClick={onClick}
-            className={`flex items-center justify-between p-2 rounded border cursor-pointer transition-all ${active ? 'bg-white/[0.05] border-zinc-700' : 'bg-transparent border-transparent hover:bg-white/[0.02]'}`}
+            className={`flex items-center justify-between p-2 rounded border cursor-pointer transition-all ${active ? 'bg-white/[0.05] border-zinc-700' : 'bg-transparent border-transparent hover:bg-white/[0.02]'} ${locked ? 'hover:border-amber-500/30' : ''}`}
+            title={locked ? 'Features are locked. Click to unlock.' : ''}
         >
-            <span className={`text-xs font-mono transition-colors ${active ? 'text-zinc-200' : 'text-zinc-500'}`}>{label}</span>
+            <div className="flex items-center gap-2">
+                <span className={`text-xs font-mono transition-colors ${active ? 'text-zinc-200' : 'text-zinc-500'}`}>{label}</span>
+                {locked && active && <Lock size={10} className="text-amber-500/70" />}
+            </div>
             <div className="flex items-center gap-2">
                 <span className="text-[10px] text-zinc-600 font-mono">{typeof value === 'number' ? value.toFixed(2) : '0.00'}</span>
                 <div
@@ -78,6 +83,29 @@ function ClassCard({ cls, prediction, onTrain, onRemove, onRename, engineType, o
     const [isRecording, setIsRecording] = useState(false);
     const intervalRef = useRef(null);
     const isUploadMode = inputSource === 'upload';
+
+    // Local state for class name input (allows typing freely, validates on blur)
+    const [localName, setLocalName] = useState(cls.name);
+    const previousNameRef = useRef(cls.name);
+
+    // Sync local state when cls.name changes externally
+    useEffect(() => {
+        setLocalName(cls.name);
+        previousNameRef.current = cls.name;
+    }, [cls.name]);
+
+    const handleNameBlur = () => {
+        const trimmed = localName.trim();
+        if (!trimmed) {
+            // Empty name - revert to previous
+            setLocalName(previousNameRef.current);
+            return;
+        }
+        if (trimmed !== previousNameRef.current) {
+            onRename(trimmed);
+            previousNameRef.current = trimmed;
+        }
+    };
 
     // File Input Ref
     const fileInputRef = useRef(null);
@@ -140,8 +168,10 @@ function ClassCard({ cls, prediction, onTrain, onRemove, onRename, engineType, o
                     <div className={`w-2 h-2 rounded-full ${isPredicted ? 'bg-emerald-500' : 'bg-zinc-700'}`}></div>
                     <input
                         className="bg-transparent border-none text-xs font-bold text-zinc-300 focus:text-white focus:outline-none placeholder-zinc-700 uppercase tracking-wider w-full"
-                        value={cls.name}
-                        onChange={(e) => onRename(e.target.value)}
+                        value={localName}
+                        onChange={(e) => setLocalName(e.target.value)}
+                        onBlur={handleNameBlur}
+                        placeholder="Class Name"
                     />
                 </div>
                 <button
@@ -448,11 +478,41 @@ export function ConceptDashboard({
     const [showAdvancedTraining, setShowAdvancedTraining] = useState(false); // New: Collapse advanced settings
     const [showEmbeddings, setShowEmbeddings] = useState(false); // Collapsible embeddings section
     // outputProtocol removed - now managed in App.jsx and passed as props
+    
+    // Feature lock warning modal state
+    const [featureLockModal, setFeatureLockModal] = useState({ open: false, featureKey: null });
+
+    // Handler for when user clicks a locked feature
+    const handleFeatureLockClick = (featureKey) => {
+        setFeatureLockModal({ open: true, featureKey });
+    };
+
+    // Handler to confirm clearing data and unlocking features
+    const handleClearAndUnlock = () => {
+        clearModel();
+        // After clearing, toggle the feature that was clicked (if desired)
+        // For now, just close the modal - user can now freely select features
+        setFeatureLockModal({ open: false, featureKey: null });
+    };
 
     // Auto-switch to monitor when running - NOW switch to DEPLOY tab (Monitor moved there)
     useEffect(() => {
         if (isRunning) setActiveView('deploy');
     }, [isRunning]);
+
+    // Calculate if there's training data (used for feature locking)
+    const hasTrainingData = trainingMode === 'classification'
+        ? classes.some(c => c.count > 0)
+        : outputs.some(o => (o.samples || 0) > 0);
+
+    // Wrapper for toggleFeature that checks for locked state
+    const handleFeatureToggle = (key) => {
+        if (hasTrainingData) {
+            handleFeatureLockClick(key);
+        } else {
+            toggleFeature(key);
+        }
+    };
 
     return (
         <div className="h-full w-full bg-[#050505] text-[#EDEDED] flex flex-col font-sans selection:bg-emerald-500/30 overflow-hidden">
@@ -627,7 +687,8 @@ export function ConceptDashboard({
                                                     value={val}
                                                     active={isActive}
                                                     color={color}
-                                                    onClick={() => toggleFeature(key)}
+                                                    onClick={() => handleFeatureToggle(key)}
+                                                    locked={hasTrainingData}
                                                 />
                                             );
                                         })}
@@ -659,7 +720,8 @@ export function ConceptDashboard({
                                                                     value={val}
                                                                     active={isActive}
                                                                     color={color}
-                                                                    onClick={() => toggleFeature(key)}
+                                                                    onClick={() => handleFeatureToggle(key)}
+                                                                    locked={hasTrainingData}
                                                                 />
                                                             );
                                                         })}
@@ -1222,6 +1284,47 @@ export function ConceptDashboard({
                 </aside>
 
             </div >
+
+            {/* Feature Lock Warning Modal */}
+            {featureLockModal.open && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+                    <div className="bg-[#0a0a0a] border border-zinc-800 rounded-lg shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+                        {/* Header */}
+                        <div className="p-6 pb-4 flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+                                <Lock className="text-amber-500" size={20} />
+                            </div>
+                            <h2 className="text-lg font-bold text-white">Features Locked</h2>
+                        </div>
+
+                        {/* Content */}
+                        <div className="px-6 pb-6">
+                            <p className="text-sm text-zinc-400 leading-relaxed">
+                                You have already collected training data. Changing features now would cause a <span className="text-amber-500 font-semibold">dimension mismatch</span> error during training.
+                            </p>
+                            <p className="text-sm text-zinc-500 mt-3">
+                                To modify features, you need to <span className="text-white font-medium">clear all training data</span> first.
+                            </p>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="px-6 pb-6 flex gap-3">
+                            <button
+                                onClick={() => setFeatureLockModal({ open: false, featureKey: null })}
+                                className="flex-1 px-4 py-2.5 rounded bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-white border border-zinc-800 text-sm font-bold uppercase tracking-wider transition-all"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleClearAndUnlock}
+                                className="flex-1 px-4 py-2.5 rounded bg-amber-500 text-black hover:bg-amber-400 text-sm font-bold uppercase tracking-wider transition-all"
+                            >
+                                Clear & Unlock
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div >
     );
 }

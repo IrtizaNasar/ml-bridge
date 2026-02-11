@@ -2,6 +2,11 @@
 import { io } from "socket.io-client";
 import { webcamManager } from "./WebcamManager";
 
+/**
+ * InputManager
+ * Handles input sources: Serial Bridge, Webcam, OSC, and file uploads.
+ * Provides unified data broadcasting to subscribers.
+ */
 class InputManager {
     constructor() {
         this.socket = null;
@@ -9,16 +14,12 @@ class InputManager {
         this.dataCallbacks = [];
         this.statusCallbacks = [];
         this.activeInputs = new Set();
+        this.serialBridgeRetryTimer = null;
+        this.serialBridgeRetryCount = 0;
+        this.maxSerialBridgeRetries = 10;
 
-        // Debug Port Injection
-        if (window.api && window.api.getWsPort) {
-            console.log('[InputManager] getWsPort API exists. Value:', window.api.getWsPort());
-        } else {
-            console.log('[InputManager] getWsPort API MISSING. Using default.');
-        }
-
+        // WebSocket port configuration (from main process or default)
         this.wsPort = (window.api && window.api.getWsPort) ? window.api.getWsPort() : 3100;
-        console.log('[InputManager] Initialized with WS Port:', this.wsPort);
 
         this.currentSource = 'serial'; // 'serial' | 'webcam' | 'upload'
 
@@ -45,9 +46,7 @@ class InputManager {
                 }
             });
 
-            // Get initial configuration
-            // We assume the main process sends this, or we request it?
-            // Actually, we can just ask for status
+            // Query initial Serial Bridge connection status
             window.api.serialBridge.status().then(status => {
                 if (status.connected) {
                     this.serialBridgeUrl = status.url;
@@ -82,6 +81,12 @@ class InputManager {
 
     // --- Serial Logic ---
     async connectSocket() {
+        // Clear any existing retry timer
+        if (this.serialBridgeRetryTimer) {
+            clearTimeout(this.serialBridgeRetryTimer);
+            this.serialBridgeRetryTimer = null;
+        }
+
         if (this.socket) {
             if (this.socket.connected) return;
             this.socket.connect();
@@ -90,54 +95,67 @@ class InputManager {
 
         // 1. Check if we know where Serial Bridge is
         if (!this.serialBridgeUrl) {
-            console.log('[InputManager] Serial Bridge URL unknown. Scanning...');
             this._notifyStatus({ connected: false, source: 'Scanning for Serial Bridge...' });
 
             if (window.api && window.api.scanSerialBridge) {
                 const foundUrl = await window.api.scanSerialBridge();
                 if (foundUrl) {
                     this.serialBridgeUrl = foundUrl;
+                    this.serialBridgeRetryCount = 0;
                 } else {
-                    this._notifyStatus({ connected: false, source: 'Serial Bridge Not Found' });
-                    return;
+                    // Not found - schedule a retry if we haven't exceeded max retries
+                    this.serialBridgeRetryCount++;
+                    if (this.serialBridgeRetryCount < this.maxSerialBridgeRetries && this.currentSource === 'serial') {
+                        const retryDelay = Math.min(2000 * this.serialBridgeRetryCount, 10000);
+                        this._notifyStatus({ connected: false, source: `Serial Bridge Not Found (retry ${this.serialBridgeRetryCount}/${this.maxSerialBridgeRetries})...` });
+                        
+                        this.serialBridgeRetryTimer = setTimeout(() => {
+                            if (this.currentSource === 'serial') {
+                                this.connectSocket();
+                            }
+                        }, retryDelay);
+                        return; // Don't create socket yet - wait for retry
+                    } else {
+                        this._notifyStatus({ connected: false, source: 'Serial Bridge Not Found. Please launch Serial Bridge app.' });
+                        return; // Don't create socket - give up
+                    }
                 }
             } else {
-                // Fallback for dev/browser mode
+                // Browser dev mode only - no Electron API available
                 this.serialBridgeUrl = "http://localhost:3000";
             }
         }
 
-        console.log('[InputManager] Serial Bridge URL:', this.serialBridgeUrl);
+        // 2. Only create socket if we have a valid URL
+        if (!this.serialBridgeUrl) {
+            return; // Safety check
+        }
 
-        // 2. Connect to Serial Bridge directly
+        // 3. Connect to Serial Bridge
         this.socket = io(this.serialBridgeUrl, {
             reconnection: true,
-            reconnectionAttempts: Infinity,
+            reconnectionAttempts: 5, // Limit retries since we handle retry logic ourselves
             reconnectionDelay: 1000,
             timeout: 5000
         });
 
         this.socket.on("connect", () => {
-
             this.isConnected = true;
-            // When connected to ML Bridge WS, we are "ready" to receive data
-            // But we might not be connected to Serial Bridge yet.
-            if (this.serialBridgeUrl) {
-                this._notifyStatus({ connected: true, source: 'Serial Bridge (Ready)' });
-            } else {
-                this._notifyStatus({ connected: false, source: 'Scanning for Serial Bridge...' });
-            }
+            this.serialBridgeRetryCount = 0; // Reset on successful connection
+            this._notifyStatus({ connected: true, source: 'Serial Bridge (Connected)' });
         });
 
         this.socket.on("connect_error", (err) => {
-            console.error("[InputManager] Socket Connect Error:", err.message);
-            this._notifyStatus({ connected: false, source: `Error: ${err.message}` });
+            // Only log once, not on every retry
+            if (this.serialBridgeRetryCount === 0) {
+                console.warn("[InputManager] Serial Bridge connection failed, will retry...");
+            }
+            this._notifyStatus({ connected: false, source: 'Connecting to Serial Bridge...' });
         });
 
         this.socket.on("disconnect", (reason) => {
-
             this.isConnected = false;
-            this._notifyStatus({ connected: false, source: 'ML Bridge Disconnected' });
+            this._notifyStatus({ connected: false, source: 'Serial Bridge Disconnected' });
         });
 
         this.socket.on("serial-data", (payload) => {
@@ -148,6 +166,13 @@ class InputManager {
     }
 
     disconnectSocket() {
+        // Clear any pending retry
+        if (this.serialBridgeRetryTimer) {
+            clearTimeout(this.serialBridgeRetryTimer);
+            this.serialBridgeRetryTimer = null;
+        }
+        this.serialBridgeRetryCount = 0;
+        
         if (this.socket) {
             this.socket.disconnect();
             this.socket = null;
@@ -294,25 +319,31 @@ class InputManager {
         });
     }
 
+    /**
+     * Broadcasts data to all registered callbacks.
+     * Always emits immediately - throttling moved to UI layer for responsiveness.
+     * High-rate sensors (100Hz+) are handled; React will batch state updates.
+     */
     _broadcastData(data) {
-        if (data && typeof data === 'object') {
-            // Recursively flatten nested objects and arrays
-            const flattened = this._flattenObject(data);
+        if (!data || typeof data !== 'object') return;
 
-            // Track active inputs
-            Object.keys(flattened).forEach(k => {
-                this.activeInputs.add(k);
-            });
+        // Flatten nested objects/arrays
+        const flattened = this._flattenObject(data);
 
-            // Notify listeners safely
-            this.dataCallbacks.forEach(cb => {
-                try {
-                    cb(flattened);
-                } catch (cbError) {
-                    console.error("[InputManager] Callback error:", cbError);
-                }
-            });
-        }
+        // Track active inputs
+        Object.keys(flattened).forEach(k => {
+            this.activeInputs.add(k);
+        });
+
+        // Emit to all callbacks immediately (no throttling here)
+        // Throttling is handled in the UI layer to keep predictions real-time
+        this.dataCallbacks.forEach(cb => {
+            try {
+                cb(flattened);
+            } catch (cbError) {
+                console.error("[InputManager] Callback error:", cbError);
+            }
+        });
     }
 
     _flattenObject(obj, prefix = '') {

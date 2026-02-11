@@ -48,7 +48,7 @@ export const NORMALIZATION_RANGES = {
     IMU: [-1, 1],
     IMU_RAW: [-4, 4],
     EEG_MICROVOLTS: [-200, 200],
-    SENSOR_DEFAULT: [-10, 10]
+    SENSOR_DEFAULT: [-1024, 1024]
 };
 
 // Confidence and Prediction

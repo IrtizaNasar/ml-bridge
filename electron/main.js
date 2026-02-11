@@ -99,15 +99,10 @@ const express = require('express');
 const http = require('http');
 const { Server: SocketIOServer } = require('socket.io');
 
-// FOR OSC CRASHES
+// Global error handler for truly unexpected errors
 process.on('uncaughtException', (err) => {
     console.error('CRITICAL UNCAUGHT EXCEPTION:', err);
-    // If it's the known EADDRNOTAVAIL from node-osc, ignore it
-    if (err.code === 'EADDRNOTAVAIL') {
-        console.warn('Ignored EADDRNOTAVAIL (OSC Binding Issue). App will continue.');
-        return;
-    }
-
+    // Log but don't crash - let the app continue if possible
 });
 
 let wsServer = null;
@@ -381,8 +376,54 @@ ipcMain.handle('serial-bridge-status', () => {
 ipcMain.handle('get-app-version', () => app.getVersion());
 
 // --- OSC Server Logic ---
-const { Server } = require('node-osc');
+const { Server: OscServer, Client: OscClient } = require('node-osc');
+const dgram = require('dgram');
 let oscServer = null;
+let oscServerReady = false;
+
+/**
+ * Attempt to create and bind an OSC server with proper error handling.
+ * node-osc's Server binds UDP synchronously in constructor, so we wrap it
+ * to catch any binding failures gracefully.
+ */
+function createOscServer(port, host) {
+    return new Promise((resolve, reject) => {
+        let server = null;
+        let settled = false;
+        
+        // Safety timeout - if no error within 200ms, assume success
+        const timeout = setTimeout(() => {
+            if (!settled) {
+                settled = true;
+                resolve(server);
+            }
+        }, 200);
+        
+        try {
+            // Create the server - this internally creates and binds a UDP socket
+            server = new OscServer(port, host);
+            
+            // Handle errors that occur after construction
+            server.on('error', (err) => {
+                if (!settled) {
+                    settled = true;
+                    clearTimeout(timeout);
+                    try { server.close(); } catch (e) {}
+                    reject(err);
+                } else {
+                    // Runtime error after successful startup
+                    console.error(`[OSC] Runtime error on ${host}:${port}:`, err.message);
+                }
+            });
+            
+        } catch (e) {
+            // Synchronous error during construction
+            settled = true;
+            clearTimeout(timeout);
+            reject(e);
+        }
+    });
+}
 
 ipcMain.handle('osc-start', async (event, port = 12000) => {
     try {
@@ -390,21 +431,24 @@ ipcMain.handle('osc-start', async (event, port = 12000) => {
         if (oscServer) {
             try { oscServer.close(); } catch (e) { }
             oscServer = null;
+            oscServerReady = false;
         }
 
         console.log(`[Main] Starting OSC Server on port ${port}...`);
 
-        const startServer = (host) => {
-            return new Promise((resolve, reject) => {
-                try {
-                    const server = new Server(port, host);
-
-                    server.on('listening', () => {
-                        console.log(`[Main] OSC Server is listening on ${host}:${port}`);
-                        resolve(server);
-                    });
-
-                    server.on('message', (msg) => {
+        // Try 0.0.0.0 first (allows external connections from TouchOSC, Wekinator, etc.)
+        // Fall back to 127.0.0.1 if 0.0.0.0 isn't available
+        const hosts = ['0.0.0.0', '127.0.0.1'];
+        let lastError = null;
+        
+        for (const host of hosts) {
+            try {
+                oscServer = await createOscServer(port, host);
+                
+                // Set up message handler
+                oscServer.on('message', (msg) => {
+                    try {
+                        const address = msg[0];
                         const args = msg.slice(1);
                         const flatArgs = args.flat();
                         const numericArgs = flatArgs.filter(a => typeof a === 'number');
@@ -418,37 +462,40 @@ ipcMain.handle('osc-start', async (event, port = 12000) => {
                                 mainWindow.webContents.send('osc-data', inputs);
                             }
                         }
-                    });
+                    } catch (parseErr) {
+                        console.error('[OSC] Message parse error:', parseErr.message);
+                    }
+                });
 
-                    server.on('error', (err) => {
-                        if (!oscServer) {
-                            reject(err);
-                        } else {
-                            console.error(`[Main] OSC Server Error (${host}):`, err.message);
-                            if (err.code === 'EADDRINUSE') {
-                                try { server.close(); } catch (e) { }
-                                oscServer = null;
-                            }
-                        }
-                    });
-
-                } catch (e) {
-                    reject(e);
-                }
-            });
-        };
-
-        try {
-            oscServer = await startServer('0.0.0.0');
-        } catch (e) {
-            console.warn(`[Main] Failed to bind to 0.0.0.0 (${e.message}). Falling back to 127.0.0.1...`);
-            oscServer = await startServer('127.0.0.1');
+                oscServerReady = true;
+                const accessType = host === '0.0.0.0' ? 'all interfaces' : 'localhost only';
+                console.log(`[Main] ✓ OSC Server listening on ${host}:${port} (${accessType})`);
+                return { 
+                    success: true, 
+                    message: `Listening on port ${port} (${accessType})`,
+                    host,
+                    port
+                };
+                
+            } catch (e) {
+                lastError = e;
+                const reason = e.code === 'EADDRNOTAVAIL' ? 'address not available' :
+                              e.code === 'EADDRINUSE' ? 'port already in use' :
+                              e.message;
+                console.warn(`[Main] OSC: Cannot bind to ${host}:${port} - ${reason}`);
+            }
         }
 
-        return { success: true, message: `Listening on port ${port}` };
+        // All hosts failed
+        const errorMsg = lastError?.code === 'EADDRINUSE' 
+            ? `Port ${port} is already in use. Try a different port.`
+            : `Could not start OSC server on port ${port}. Check network settings.`;
+        throw new Error(errorMsg);
 
     } catch (e) {
-        console.error("[Main] OSC Start Error:", e);
+        console.error("[Main] OSC Start Error:", e.message);
+        oscServer = null;
+        oscServerReady = false;
         return { success: false, error: e.message };
     }
 });
@@ -466,19 +513,19 @@ ipcMain.handle('osc-stop', async () => {
     }
 });
 
-const { Client } = require('node-osc');
 let oscClient = null;
 
 ipcMain.handle('osc-send', async (event, ip, port, address, args) => {
     try {
         // Reuse client if same destination
         if (!oscClient || oscClient.host !== ip || oscClient.port !== port) {
-            if (oscClient) oscClient.close();
-            oscClient = new Client(ip, port);
+            if (oscClient) {
+                try { oscClient.close(); } catch (e) {}
+            }
+            oscClient = new OscClient(ip, port);
         }
 
         // Send: client.send(address, arg1, arg2, ...)
-        // We unpack the spread args
         oscClient.send(address, ...args);
         return { success: true };
 

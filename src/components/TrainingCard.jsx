@@ -268,6 +268,29 @@ function ClassCard({ cls, prediction, onTrain, onRemove, onRename, engineType, o
     const isPredicted = prediction?.label === cls.id;
     const [isRecording, setIsRecording] = React.useState(false);
 
+    // Local state for class name input (allows typing freely, validates on blur)
+    const [localName, setLocalName] = React.useState(cls.name);
+    const previousNameRef = React.useRef(cls.name);
+
+    // Sync local state when cls.name changes externally
+    React.useEffect(() => {
+        setLocalName(cls.name);
+        previousNameRef.current = cls.name;
+    }, [cls.name]);
+
+    const handleNameBlur = () => {
+        const trimmed = localName.trim();
+        if (!trimmed) {
+            // Empty name - revert to previous
+            setLocalName(previousNameRef.current);
+            return;
+        }
+        if (trimmed !== previousNameRef.current) {
+            onRename(trimmed);
+            previousNameRef.current = trimmed;
+        }
+    };
+
     // File Input Ref
     const fileInputRef = React.useRef(null);
 
@@ -299,8 +322,10 @@ function ClassCard({ cls, prediction, onTrain, onRemove, onRename, engineType, o
                     <div>
                         <input
                             type="text"
-                            value={cls.name}
-                            onChange={(e) => onRename(e.target.value)}
+                            value={localName}
+                            onChange={(e) => setLocalName(e.target.value)}
+                            onBlur={handleNameBlur}
+                            placeholder="Class Name"
                             className="text-lg font-medium text-white/90 tracking-tight bg-transparent border-none p-0 focus:outline-none focus:ring-0 focus:border-b focus:border-white/20 w-32 placeholder-white/20"
                         />
                         <p className="text-white/30 text-[10px] font-mono mt-0.5">{cls.id}</p>

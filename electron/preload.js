@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld('api', {
         }
     },
     on: (channel, func) => {
-        let validChannels = ["fromMain", "sensor-data"];
+        let validChannels = ["fromMain", "sensor-data", "serial-bridge-found", "serial-bridge-status"];
         if (validChannels.includes(channel)) {
             // Deliberately strip event as it includes `sender` 
             ipcRenderer.on(channel, (event, ...args) => func(...args));

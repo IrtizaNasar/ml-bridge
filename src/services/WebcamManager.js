@@ -28,13 +28,30 @@ class WebcamManager {
     }
 
     async ensureModelLoaded() {
-        if (this.model) return;
+        // If model exists and is valid, return immediately
+        if (this.model) {
+            // Verify model is still functional by checking a property
+            try {
+                if (this.model.model) return; // Model looks valid
+            } catch (e) {
+                console.warn('[WebcamManager] Model reference stale, reloading...');
+                this.model = null;
+            }
+        }
+        
         if (this.isModelLoading) {
             // Wait for existing load
-            while (this.isModelLoading) {
+            let waitAttempts = 0;
+            while (this.isModelLoading && waitAttempts < 100) { // Max 10 seconds wait
                 await new Promise(r => setTimeout(r, 100));
+                waitAttempts++;
             }
             if (this.model) return;
+            // If still loading after 10s, something is wrong - proceed to reload
+            if (this.isModelLoading) {
+                console.warn('[WebcamManager] Model loading stuck, forcing reload...');
+                this.isModelLoading = false;
+            }
         }
 
         this.isModelLoading = true;
@@ -43,12 +60,25 @@ class WebcamManager {
 
         console.log('[WebcamManager] Initializing TensorFlow backend...');
         try {
-            await tf.setBackend('webgl');
-            console.log('[WebcamManager] Backend set to WebGL');
+            // Ensure TensorFlow is ready - this helps after source switches
+            await tf.ready();
+            
+            const currentBackend = tf.getBackend();
+            console.log(`[WebcamManager] Current backend: ${currentBackend}`);
+            
+            // Try WebGL if not already set
+            if (currentBackend !== 'webgl') {
+                try {
+                    await tf.setBackend('webgl');
+                    await tf.ready();
+                    console.log('[WebcamManager] Backend set to WebGL');
+                } catch (e) {
+                    console.warn('[WebcamManager] WebGL failed, using:', tf.getBackend());
+                }
+            }
         } catch (e) {
-            console.warn('[WebcamManager] WebGL Failed, falling back to CPU:', e);
-            await tf.setBackend('cpu');
-            console.log('[WebcamManager] Backend set to CPU');
+            console.warn('[WebcamManager] Backend initialization issue:', e.message);
+            // Continue anyway - TF might still work
         }
 
         console.log('[WebcamManager] Loading MobileNet...');

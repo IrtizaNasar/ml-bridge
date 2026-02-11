@@ -2,9 +2,20 @@ import { Visualizer } from './Visualizer';
 import { WebcamPreview } from './WebcamPreview';
 import { Lock } from 'lucide-react';
 
-export function InputCard({ incomingData, connectionStatus, isProMode, selectedFeatures, onToggleFeature, hasTrainingData }) {
+export function InputCard({ incomingData, connectionStatus, isProMode, selectedFeatures, onToggleFeature, hasTrainingData, onFeatureLockClick }) {
     // Extract number of keys for display stats
     const featureCount = Object.keys(incomingData || {}).length;
+
+    // Handler for clicking on a feature row
+    const handleFeatureClick = (key) => {
+        if (hasTrainingData) {
+            // Feature is locked - trigger warning modal
+            if (onFeatureLockClick) onFeatureLockClick(key);
+        } else {
+            // Feature is unlocked - toggle normally
+            onToggleFeature(key);
+        }
+    };
 
     return (
         <div className="col-span-12 lg:col-span-4 fui-panel p-0 flex flex-col h-full min-h-[500px] overflow-hidden relative">
@@ -15,9 +26,9 @@ export function InputCard({ incomingData, connectionStatus, isProMode, selectedF
                     <div className="flex items-center gap-2">
                         <h3 className="text-sm font-medium text-white/90 tracking-tight">Input Stream</h3>
                         {hasTrainingData && (
-                            <div className="text-[10px] text-amber-500/80 border border-amber-500/20 px-1.5 py-0.5 rounded flex items-center gap-1 bg-amber-500/5 shadow-[0_0_10px_rgba(245,158,11,0.1)]">
+                            <div className="text-[10px] text-amber-500/80 border border-amber-500/20 px-1.5 py-0.5 rounded flex items-center gap-1 bg-amber-500/5 shadow-[0_0_10px_rgba(245,158,11,0.1)]" title="Features are locked. Click a feature to unlock.">
                                 <Lock size={10} strokeWidth={2.5} />
-                                <span className="font-bold tracking-wider uppercase text-[9px]">Fixed</span>
+                                <span className="font-bold tracking-wider uppercase text-[9px]">Locked</span>
                             </div>
                         )}
                     </div>
@@ -57,7 +68,7 @@ export function InputCard({ incomingData, connectionStatus, isProMode, selectedF
                 )}
 
                 {featureCount > 0 ? (
-                    <div className={`space-y-1 px-2 ${hasTrainingData ? 'pointer-events-none grayscale-[0.5] opacity-80' : ''}`}>
+                    <div className={`space-y-1 px-2 ${hasTrainingData ? 'opacity-90' : ''}`}>
                         {/* Header Row */}
                         <div className="flex justify-between px-4 py-2 text-white/30 text-[10px] uppercase tracking-wider font-sans font-medium mb-1">
                             <span>Sensor Channel</span>
@@ -69,10 +80,11 @@ export function InputCard({ incomingData, connectionStatus, isProMode, selectedF
                                 return Object.entries(incomingData || {}).map(([key, val]) => {
                                     const isSelected = selectedFeatures.has(key);
                                     return (
-                                        <div key={key} className={`flex justify-between items-center px-4 py-3 rounded-lg transition-all cursor-pointer group border ${isSelected ? 'bg-white/[0.03] border-white/5' : 'border-transparent hover:bg-white/[0.02]'}`} onClick={() => !hasTrainingData && onToggleFeature(key)}>
+                                        <div key={key} className={`flex justify-between items-center px-4 py-3 rounded-lg transition-all cursor-pointer group border ${isSelected ? 'bg-white/[0.03] border-white/5' : 'border-transparent hover:bg-white/[0.02]'} ${hasTrainingData ? 'hover:border-amber-500/30' : ''}`} onClick={() => handleFeatureClick(key)}>
                                             <div className="flex items-center gap-3">
-                                                <div className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all ${isSelected ? 'bg-emerald-500 border-emerald-500 shadow-sm' : 'border-white/20 group-hover:border-white/40'}`}>
+                                                <div className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all ${isSelected ? 'bg-emerald-500 border-emerald-500 shadow-sm' : 'border-white/20 group-hover:border-white/40'} ${hasTrainingData && isSelected ? 'relative' : ''}`}>
                                                     {isSelected && <div className="text-black text-[10px]">✓</div>}
+                                                    {hasTrainingData && isSelected && <Lock size={8} className="absolute -top-1 -right-1 text-amber-500" />}
                                                 </div>
                                                 <span className={`text-sm font-medium font-sans ${isSelected ? 'text-white/90' : 'text-white/40'}`}>{key}</span>
                                             </div>

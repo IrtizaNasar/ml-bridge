@@ -77,6 +77,10 @@ function App() {
     const lastDataTimeRef = useRef(0); // Track timestamp of last received data
     const inputSourceRef = useRef(inputSource);
 
+    // UI throttling: Only update display at 30fps, but keep refs real-time for predictions
+    const lastUIUpdateRef = useRef(0);
+    const uiUpdateIntervalMs = 33; // ~30fps for UI updates
+
     // Feature Selection
     const [selectedFeatures, setSelectedFeatures] = useState(new Set());
     const [dataRefreshKey, setDataRefreshKey] = useState(0); // Trigger for DataView refresh
@@ -214,41 +218,29 @@ function App() {
         performSourceSwitch(source);
     };
 
+    /**
+     * Performs a full reset when switching input sources.
+     * Clears all training data, features, and resets UI state.
+     */
     const performSourceSwitch = (source) => {
         setInputSource(source);
         inputManager.setSource(source);
 
-        // Full Reset
+        // Reset data state
         setIncomingData({});
         lastDataRef.current = {};
         setSelectedFeatures(new Set());
         selectedFeaturesRef.current = new Set();
         setHasSignal(false);
 
-        // Reset detected message types when switching input sources
+        // Reset message type filtering (for multi-stream devices)
         setDetectedMessageTypes(new Set());
         setMessageTypeFilter(null);
 
-        // Clear model and training data
+        // Clear ML engine and training data
         mlEngine.clearAll();
-        setClasses([
-            { id: 'class_1', name: 'Class 1', count: 0 },
-            { id: 'class_2', name: 'Class 2', count: 0 },
-        ]);
-        setOutputs([
-            { id: 'out_1', name: 'Parameter 1', value: 0.5, samples: 0 }
-        ]);
         setTrainingProgress(null);
-
-        // Clear feature tracking
-        lastSeenFeaturesRef.current.clear();
-        if (featureUpdateTimerRef.current) {
-            clearTimeout(featureUpdateTimerRef.current);
-            featureUpdateTimerRef.current = null;
-        }
-
         setPrediction(null);
-        // setTrainingProgress(null); // This line is now redundant due to the above change
         setIsRunning(false);
         setIsTraining(false);
 
@@ -262,6 +254,13 @@ function App() {
         setOutputs([
             { id: 'out_1', name: 'Parameter 1', value: 0.5, samples: 0 }
         ]);
+
+        // Clear feature tracking timers
+        lastSeenFeaturesRef.current.clear();
+        if (featureUpdateTimerRef.current) {
+            clearTimeout(featureUpdateTimerRef.current);
+            featureUpdateTimerRef.current = null;
+        }
     };
 
     const handleConfirmSourceChange = () => {
@@ -464,7 +463,7 @@ function App() {
         inputManager.onStatus(setConnectionStatus);
 
         inputManager.onData(async (data) => {
-            // Auto-detect message types for dynamic filtering
+            // Auto-detect message types for dynamic filtering (multi-stream devices like Muse 2)
             if (data.type) {
                 setDetectedMessageTypes(prev => {
                     if (!prev.has(data.type)) {
@@ -474,20 +473,21 @@ function App() {
                 });
             }
 
-            // Optional filtering for multi-stream devices (e.g., Muse 2)
-            // Only filter if user has explicitly selected a message type
+            // Filter by message type if user has selected one
             if (messageTypeFilterRef.current && data.type && data.type !== messageTypeFilterRef.current) {
-                console.log(`[Filter] Skipping ${data.type} (filter: ${messageTypeFilterRef.current})`);
-                return; // Skip messages that don't match selected type
+                return;
             }
 
-            if (messageTypeFilterRef.current && data.type) {
-                console.log(`[Filter] Accepting ${data.type} message`);
-            }
-
-            setIncomingData(data);
+            // ALWAYS update refs immediately (real-time for predictions/training)
             lastDataRef.current = data;
-            lastDataTimeRef.current = Date.now(); // Update timestamp
+            lastDataTimeRef.current = Date.now();
+
+            // Throttle UI state updates to ~30fps to prevent lag
+            const now = Date.now();
+            if (now - lastUIUpdateRef.current >= uiUpdateIntervalMs) {
+                lastUIUpdateRef.current = now;
+                setIncomingData(data);
+            }
 
             // Gesture Auto-Capture Logic
             if (trainingConfigRef.current.autoCapture && recordingClassIdRef.current) {
@@ -495,12 +495,12 @@ function App() {
             }
 
             // Track currently streaming features (for real-time detection)
-            const now = Date.now();
+            const featureCheckTime = Date.now();
             const numericKeys = Object.keys(data).filter(k => typeof data[k] === 'number');
 
             // Update last seen timestamp for each active feature
             numericKeys.forEach(key => {
-                lastSeenFeaturesRef.current.set(key, now);
+                lastSeenFeaturesRef.current.set(key, featureCheckTime);
             });
 
             // Auto-populate features if empty (Startup or Source Switch)
@@ -522,11 +522,12 @@ function App() {
             featureUpdateTimerRef.current = setTimeout(() => {
                 if (selectedFeaturesRef.current.size > 0) {
                     const currentFeatures = Array.from(selectedFeaturesRef.current);
+                    const checkTime = Date.now();
 
                     // Only keep features seen within grace period
                     const activeFeatures = currentFeatures.filter(f => {
                         const lastSeen = lastSeenFeaturesRef.current.get(f);
-                        return lastSeen && (now - lastSeen < FEATURE_DETECTION.GRACE_PERIOD_MS);
+                        return lastSeen && (checkTime - lastSeen < FEATURE_DETECTION.GRACE_PERIOD_MS);
                     });
 
                     // Only update if features actually changed
@@ -534,9 +535,6 @@ function App() {
                         const updatedSet = new Set(activeFeatures);
                         setSelectedFeatures(updatedSet);
                         selectedFeaturesRef.current = updatedSet;
-
-                        const removed = currentFeatures.filter(f => !activeFeatures.includes(f));
-                        console.log(`[App] Updated features: removed inactive sensors [${removed.join(', ')}]`);
                     }
                 }
             }, FEATURE_DETECTION.UPDATE_CHECK_INTERVAL_MS);
@@ -801,8 +799,7 @@ function App() {
         // Validate class name
         const validation = validateClassName(newName);
         if (!validation.valid) {
-            alert(validation.error);
-            // Revert to current name
+            // Invalid name - component will revert to previous
             return;
         }
 

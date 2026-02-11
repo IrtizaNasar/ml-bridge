@@ -12,87 +12,48 @@ import { NORMALIZATION_RANGES } from '../constants';
  * @returns {string} Detected data type ('image', 'imu', 'eeg', 'sensor')
  */
 export function detectDataType(inputData, keys) {
-    // First check if data is already normalized (most common case for Serial Bridge)
-    const sampleValues = keys.slice(0, Math.min(20, keys.length)).map(k => Math.abs(inputData[k] || 0));
-    const maxAbs = Math.max(...sampleValues);
-    const minAbs = Math.min(...sampleValues.filter(v => v > 0));
-
-    // If values are already in [-1, 1] range, assume already normalized
-    if (maxAbs <= 1.2 && (minAbs === 0 || minAbs >= 0)) {
-        const hasNegative = keys.some(k => (inputData[k] || 0) < 0);
-        if (!hasNegative && maxAbs <= 1.0) {
-            return 'image'; // Already normalized 0-1 (images/color)
-        }
-        return 'sensor'; // Already normalized, pass through
-    }
-
-    // Check for image features (pixel data, already normalized 0-1)
+    // 1. Check for image features (Priority: HIGHEST)
+    // Strictly require 'px_' prefix or high-dimensional 'f' keys (webcam embeddings)
     if (keys.some(k => k.startsWith('px_') || (k.startsWith('f') && keys.length > 100))) {
-        const imgSampleValues = keys.slice(0, Math.min(10, keys.length)).map(k => inputData[k] || 0);
-        const maxVal = Math.max(...imgSampleValues);
-        const minVal = Math.min(...imgSampleValues);
-        if (minVal >= 0 && maxVal <= 1.1) {
-            return 'image';
-        }
+        return 'image';
     }
 
-    // Check feature names for IMU patterns
-    const imuPatterns = ['ax', 'ay', 'az', 'gx', 'gy', 'gz', 'mx', 'my', 'mz'];
+    // 2. Check feature names for IMU patterns (Priority: HIGH)
+    // Named sensors are always trusted
+    const imuPatterns = ['ax', 'ay', 'az', 'gx', 'gy', 'gz', 'mx', 'my', 'mz', 'acc', 'gyro', 'mag'];
     const hasIMUPatterns = imuPatterns.some(pattern =>
         keys.some(k => k.toLowerCase() === pattern || k.toLowerCase().includes(pattern))
     );
-
     if (hasIMUPatterns) {
-        const sampleValues = keys.slice(0, Math.min(10, keys.length)).map(k => Math.abs(inputData[k] || 0));
-        const maxAbs = Math.max(...sampleValues);
-        if (maxAbs > 0.1 && maxAbs < 100) {
-            return 'imu';
-        }
+        return 'imu';
     }
 
-    // Check for generic channel names
-    const hasChannelPattern = keys.some(k => /^ch[_\s]?\d+$/i.test(k) || /^channel[_\s]?\d+$/i.test(k));
-
-    if (hasChannelPattern) {
-        const sampleValues = keys.slice(0, Math.min(10, keys.length)).map(k => Math.abs(inputData[k] || 0));
-        const maxAbs = Math.max(...sampleValues);
-        const minAbs = Math.min(...sampleValues.filter(v => v > 0));
-
-        if (maxAbs > 50) return 'eeg';
-        if (maxAbs > 0.1 && maxAbs < 20) return 'imu';
-        if (maxAbs <= 1.1 && minAbs >= 0) return 'image';
-    }
-
-    // Check for EEG-specific patterns
+    // 3. Check for EEG-specific patterns (Priority: HIGH)
     if (keys.some(k => k.toLowerCase().includes('eeg') || k.toLowerCase().includes('electrode'))) {
         return 'eeg';
     }
 
-    // Check for color sensor patterns
-    const colorPatterns = ['r', 'g', 'b', 'red', 'green', 'blue', 'clear', 'proximity'];
-    const hasColorPatterns = colorPatterns.some(pattern =>
-        keys.some(k => k.toLowerCase() === pattern || k.toLowerCase().includes(pattern))
-    );
-    if (hasColorPatterns) {
-        const sampleValues = keys.slice(0, Math.min(10, keys.length)).map(k => inputData[k] || 0);
-        const maxVal = Math.max(...sampleValues);
-        const minVal = Math.min(...sampleValues);
-        if (minVal >= 0 && maxVal <= 1.1) {
-            return 'image';
-        }
+    // 4. Generic/Unknown Keys (e.g. ch_0, val_1) (Priority: LOW - Fallback)
+    // Here we must guess based on values, but SAFELY.
+
+    // Check if data is already normalized (most common case for Serial Bridge)
+    const sampleValues = keys.slice(0, Math.min(20, keys.length)).map(k => Math.abs(inputData[k] || 0));
+    const maxAbs = Math.max(...sampleValues);
+
+    // If ANY value is > 1.2, assume it is RAW SENSOR data (needs scaling).
+    // This prevents "splitting" a sample where some values are kept and others scaled.
+    if (maxAbs > 1.2) {
+        return 'raw_sensor'; // New type: specific for 0-1024 or 0-4096 ranges
     }
 
-    // Check value ranges for generic sensor data
-    if (maxAbs > 0.1 && maxAbs < 20) return 'imu';
-    if (maxAbs > 50) return 'eeg';
-
+    // Otherwise, it's likely already normalized (or small raw values). Pass through.
     return 'sensor';
 }
 
 /**
  * Normalizes a single value based on data type
  * @param {number} value - Value to normalize
- * @param {string} dataType - Data type ('image', 'imu', 'eeg', 'sensor')
+ * @param {string} dataType - Data type ('image', 'imu', 'eeg', 'sensor', 'raw_sensor')
  * @returns {number} Normalized value in appropriate range
  */
 export function normalizeValue(value, dataType) {
@@ -101,30 +62,22 @@ export function normalizeValue(value, dataType) {
             // Images are normalized to [0, 1] range
             return Math.max(NORMALIZATION_RANGES.IMAGE[0], Math.min(NORMALIZATION_RANGES.IMAGE[1], value));
 
-        case 'imu':
-            // IMU sensor data: normalize to [-1, 1]
-            // Check if already normalized first
-            if (Math.abs(value) <= 1.2) {
-                return Math.max(NORMALIZATION_RANGES.IMU[0], Math.min(NORMALIZATION_RANGES.IMU[1], value));
-            }
-            // Otherwise, normalize from typical raw IMU range
-            const imuNormalized = value / Math.abs(NORMALIZATION_RANGES.IMU_RAW[1]);
-            return Math.max(NORMALIZATION_RANGES.IMU[0], Math.min(NORMALIZATION_RANGES.IMU[1], imuNormalized));
-
         case 'eeg':
             // EEG data normalized to typical microvolts range
             const eegNormalized = value / Math.abs(NORMALIZATION_RANGES.EEG_MICROVOLTS[1]);
             return Math.max(-1, Math.min(1, eegNormalized));
 
+        case 'raw_sensor':
+            // Explicitly RAW data (detected via > 1.2 values).
+            // Always divide by large range. Do NOT check for "already normalized".
+            const rawNormalized = value / Math.abs(NORMALIZATION_RANGES.SENSOR_DEFAULT[1]);
+            return Math.max(-1, Math.min(1, rawNormalized));
+
         case 'sensor':
         default:
-            // Generic sensor data: detect if already normalized
-            if (Math.abs(value) <= 1.1) {
-                return value;
-            }
-            // Otherwise, apply conservative normalization
-            const sensorNormalized = value / Math.abs(NORMALIZATION_RANGES.SENSOR_DEFAULT[1]);
-            return Math.max(-1, Math.min(1, sensorNormalized));
+            // Generic sensor data (likely already normalized or small values)
+            // Just clamp to safe range
+            return Math.max(-1, Math.min(1, value));
     }
 }
 

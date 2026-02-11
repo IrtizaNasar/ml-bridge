@@ -1,6 +1,7 @@
 import * as tf from '@tensorflow/tfjs';
 import * as knn from '@tensorflow-models/knn-classifier';
 import JSZip from 'jszip';
+import { detectDataType, normalizeValue } from './normalization';
 
 /**
  * MLEngine
@@ -606,10 +607,28 @@ class MLEngine {
     }
 
     /**
-     * Clears all training data and models
+     * Clears all training data, models, and resets state.
+     * Properly disposes TensorFlow resources to prevent memory leaks.
      */
     clearAll() {
-        this.classifier.clearAllClasses();
+        // Dispose KNN classifier and recreate (clears shape memory)
+        this.classifier.dispose();
+        this.classifier = knn.create();
+
+        // Dispose Dense model if exists (prevents GPU memory leak)
+        if (this.denseModel) {
+            this.denseModel.dispose();
+            this.denseModel = null;
+        }
+
+        // Dispose regression tensors
+        Object.values(this.regressionData).forEach(examples => {
+            examples.forEach(ex => {
+                if (ex.tensor) ex.tensor.dispose();
+            });
+        });
+
+        // Reset all state
         this.regressionData = {};
         this.denseData = [];
         this.classes.clear();
@@ -617,11 +636,8 @@ class MLEngine {
         this.history = [];
         this.predictionHistory = [];
         this.lastStablePrediction = null;
-        this.denseModel = null;
         this.denseModelType = null;
         this.regressionOutputIds = null;
-
-        console.log('[MLEngine] All data and models cleared');
     }
 
     // --- Utils ---
@@ -637,14 +653,24 @@ class MLEngine {
 
         // Detect data type if auto
         if (dataType === 'auto') {
-            dataType = this._detectDataType(inputData, keys);
+            dataType = detectDataType(inputData, keys);
         }
 
         // Current snapshot - normalize based on data type
-        const currentValues = keys.map(k => {
+        let currentValues = keys.map(k => {
             const value = inputData[k] || 0;
-            return this._normalizeValue(value, dataType);
+            return normalizeValue(value, dataType);
         });
+
+        // CRITICAL FIX FOR KNN CLASSIFIER (1D SENSORS)
+        // TFJS KNN uses Cosine Similarity (Angle).
+        // A 1D scalar vector [v] always normalizes to length 1.0 (loss of magnitude).
+        // We PAD 1D vectors with a constant to map Magnitude -> Angle.
+        // [0.1] -> [0.1, 0.5], [0.9] -> [0.9, 0.5].
+        // This makes them distinguishable by angle.
+        if (currentValues.length === 1) {
+            currentValues.push(0.5); // Pad with constant
+        }
 
         // Update history
         this.history.push(currentValues);
@@ -657,7 +683,7 @@ class MLEngine {
             // Fill with zeros if history is not full yet
             let flattened = [];
             for (let i = 0; i < this.windowSize; i++) {
-                const snapshot = this.history[this.history.length - 1 - i] || new Array(keys.length).fill(0);
+                const snapshot = this.history[this.history.length - 1 - i] || new Array(currentValues.length).fill(0);
                 flattened = [...snapshot, ...flattened]; // Maintain temporal order
             }
             return tf.tensor1d(flattened);
@@ -666,145 +692,7 @@ class MLEngine {
         return tf.tensor1d(currentValues);
     }
 
-    // Detect data type from input data characteristics
-    _detectDataType(inputData, keys) {
-        // 0. First check if data is already normalized (most common case for Serial Bridge)
-        const sampleValues = keys.slice(0, Math.min(20, keys.length)).map(k => Math.abs(inputData[k] || 0));
-        const maxAbs = Math.max(...sampleValues);
-        const minAbs = Math.min(...sampleValues.filter(v => v > 0));
 
-        // If values are already in [-1, 1] range, assume already normalized
-        // Allow slight overflow (up to 1.2) for edge cases
-        if (maxAbs <= 1.2 && (minAbs === 0 || minAbs >= 0)) {
-            // Check if it's image data (0-1 range) or sensor data (-1 to 1 range)
-            const hasNegative = keys.some(k => (inputData[k] || 0) < 0);
-            if (!hasNegative && maxAbs <= 1.0) {
-                return 'image'; // Already normalized 0-1 (images/color)
-            }
-            // Has negative values or slightly over 1.0 = already normalized sensor data
-            return 'sensor'; // Already normalized, pass through
-        }
-
-        // 1. Check for image features (pixel data, already normalized 0-1)
-        if (keys.some(k => k.startsWith('px_') || (k.startsWith('f') && keys.length > 100))) {
-            // Check if values are in [0, 1] range (images/webcam embeddings)
-            const imgSampleValues = keys.slice(0, Math.min(10, keys.length)).map(k => inputData[k] || 0);
-            const maxVal = Math.max(...imgSampleValues);
-            const minVal = Math.min(...imgSampleValues);
-            if (minVal >= 0 && maxVal <= 1.1) {
-                return 'image'; // Already normalized
-            }
-        }
-
-        // 2. Check feature names for IMU patterns (ax, ay, az, gx, gy, gz, mx, my, mz)
-        const imuPatterns = ['ax', 'ay', 'az', 'gx', 'gy', 'gz', 'mx', 'my', 'mz'];
-        const hasIMUPatterns = imuPatterns.some(pattern =>
-            keys.some(k => k.toLowerCase() === pattern || k.toLowerCase().includes(pattern))
-        );
-
-        if (hasIMUPatterns) {
-            // IMU data - check value ranges
-            const sampleValues = keys.slice(0, Math.min(10, keys.length)).map(k => Math.abs(inputData[k] || 0));
-            const maxAbs = Math.max(...sampleValues);
-            // IMU typically ranges from -4 to +4 (accelerometer/gyro) or -50 to +50 (magnetometer)
-            if (maxAbs > 0.1 && maxAbs < 100) {
-                return 'imu';
-            }
-        }
-
-        // 3. Check for generic channel names (ch_0, ch_1, etc.) - could be IMU, EEG, or other
-        const hasChannelPattern = keys.some(k => /^ch[_\s]?\d+$/i.test(k) || /^channel[_\s]?\d+$/i.test(k));
-
-        if (hasChannelPattern) {
-            // Check value ranges to guess type
-            const sampleValues = keys.slice(0, Math.min(10, keys.length)).map(k => Math.abs(inputData[k] || 0));
-            const maxAbs = Math.max(...sampleValues);
-            const minAbs = Math.min(...sampleValues.filter(v => v > 0));
-
-            // EEG typically has larger values (microvolts: 10-200+)
-            if (maxAbs > 50) {
-                return 'eeg';
-            }
-            // IMU typically in [-4, 4] range
-            if (maxAbs > 0.1 && maxAbs < 20) {
-                return 'imu';
-            }
-            // Color sensors typically in [0, 1] after normalization
-            if (maxAbs <= 1.1 && minAbs >= 0) {
-                return 'image'; // Color data normalized
-            }
-        }
-
-        // 4. Check for EEG-specific patterns
-        if (keys.some(k => k.toLowerCase().includes('eeg') || k.toLowerCase().includes('electrode'))) {
-            return 'eeg';
-        }
-
-        // 5. Check for color sensor patterns (r, g, b, c, proximity)
-        const colorPatterns = ['r', 'g', 'b', 'red', 'green', 'blue', 'clear', 'proximity'];
-        const hasColorPatterns = colorPatterns.some(pattern =>
-            keys.some(k => k.toLowerCase() === pattern || k.toLowerCase().includes(pattern))
-        );
-        if (hasColorPatterns) {
-            const sampleValues = keys.slice(0, Math.min(10, keys.length)).map(k => inputData[k] || 0);
-            const maxVal = Math.max(...sampleValues);
-            const minVal = Math.min(...sampleValues);
-            // Color data is usually normalized to [0, 1]
-            if (minVal >= 0 && maxVal <= 1.1) {
-                return 'image'; // Color normalized
-            }
-        }
-
-        // 6. Check value ranges for generic sensor data (if not already normalized)
-        // If values are in IMU-like range, assume IMU
-        if (maxAbs > 0.1 && maxAbs < 20) {
-            return 'imu'; // Default to IMU for gesture recognition
-        }
-
-        // If values are large, assume EEG or unnormalized sensor
-        if (maxAbs > 50) {
-            return 'eeg';
-        }
-
-        // Default: conservative normalization for unknown sensor types
-        return 'sensor';
-    }
-
-    // Normalize a single value based on data type
-    _normalizeValue(value, dataType) {
-        switch (dataType) {
-            case 'image':
-                // Images are normalized to [0, 1] range
-                return Math.max(0, Math.min(1, value));
-
-            case 'imu':
-                // IMU sensor data (accelerometer/gyroscope): normalize to [-1, 1]
-                // Check if already normalized first (Serial Bridge often sends pre-normalized data)
-                if (Math.abs(value) <= 1.2) {
-                    // Normalized to [-1, 1] range
-                    return Math.max(-1, Math.min(1, value));
-                }
-                // Otherwise, normalize from typical raw IMU range: -4 to +4
-                return Math.max(-1, Math.min(1, value / 4.0));
-
-            case 'eeg':
-                // EEG data normalized to typical microvolts range
-                // Typical EEG range: -200 to +200 microvolts, but can vary
-                // Use adaptive normalization: divide by max observed or use fixed scale
-                return Math.max(-1, Math.min(1, value / 200.0));
-
-            case 'sensor':
-            default:
-                // Generic sensor data: try to detect if already normalized
-                // If value is in [-1, 1] range, assume already normalized
-                if (Math.abs(value) <= 1.1) {
-                    return value; // Already normalized
-                }
-                // Otherwise, apply conservative normalization
-                // Sensor data normalized to [-10, 10] range
-                return Math.max(-1, Math.min(1, value / 10.0));
-        }
-    }
 
     // Normalize a sequence of samples (for gesture capture)
     _normalizeSequence(samples, selectedFeatures, dataType = 'auto') {
@@ -961,23 +849,8 @@ class MLEngine {
         this.predictionCooldown = Math.max(0, Math.min(1000, ms));
     }
 
-    clearAll() {
-        this.classifier.clearAllClasses();
-        this.classes.clear();
-        this.denseData = [];
-        this.denseModel = null;
-        this.denseModelType = null;
-        this.regressionOutputIds = null;
-
-        Object.values(this.regressionData).forEach(examples => {
-            examples.forEach(ex => ex.tensor.dispose());
-        });
-        this.regressionData = {};
-        this.previousRegressionValues = {};
-        this.history = []; // Clear history
-        this.predictionHistory = []; // Clear prediction history
-        this.lastStablePrediction = null; // Clear stable prediction
-    }
+    // NOTE: clearAll() is defined earlier in this class (line ~612)
+    // Do not add another clearAll() here - JavaScript will use the last definition
 
     clearClassData(classId) {
         // Remove from KNN classifier
@@ -1029,8 +902,9 @@ class MLEngine {
     }
 
     _rebuildKnnState() {
-        // 1. Clear KNN Classifiers
-        this.classifier.clearAllClasses();
+        // 1. Clear KNN Classifiers - MUST recreate to reset shape memory
+        this.classifier.dispose();
+        this.classifier = knn.create();
         this.regressionData = {};
         this.classes.clear();
 

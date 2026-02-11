@@ -37,14 +37,48 @@ It is designed to sit perfectly between **Serial Bridge** (for hardware data) an
 
 ## Features
 
--   **Universal Input**: Seamlessly ingest data from **Serial Bridge** (Arduino/ESP32), **Webcam** (pixels), or **OSC** (external apps).
--   **Dual Engines**:
-    -   **KNN (K-Nearest Neighbors)**: Instant training, zero wait time. Perfect for rapid prototyping.
-    -   **Dense (Neural Network)**: A powerful pattern matcher. Best for complex gestures.
--   **Temporal Windowing**: Train **gestures** (swipes, waves, shapes) not just static poses using the built-in time-series buffer.
--   **No-Code Interface**: Add classes, rename labels, and tune hyperparameters with a sleek UI.
--   **Live Visualizers**: Real-time oscilloscope views, confidence meters, and regression bars.
--   **OSC Broadcasting**: Stream prediction results straight to TouchDesigner, Unity, or Max/MSP.
+-   **Universal Input**: Seamlessly ingest data from multiple sources
+    -   **Serial Bridge**: Connect Arduino/ESP32 sensors via Serial Bridge (auto-discovers ports 3000-3010)
+    -   **Webcam**: Train on camera input (automatically preprocessed to 64x64 grayscale, 4096 features)
+    -   **OSC**: Receive data from TouchDesigner, Max/MSP, or other OSC-enabled applications
+-   **Dual ML Engines**:
+    -   **KNN (K-Nearest Neighbors)**: Instant training with zero wait time - perfect for rapid prototyping and real-time exploration
+    -   **Dense (Neural Network)**: Powerful deep learning for complex patterns - trains in ~30 seconds for production-ready gesture recognition
+-   **Temporal Windowing**: Train **gestures** (swipes, waves, shapes) not just static poses
+    -   Configurable 1-20 frame window for capturing motion over time
+    -   Built-in time-series buffer for gesture sequence recognition
+-   **Auto-Capture**: Motion detection for hands-free training
+    -   Threshold slider for sensitivity control (default 0.167)
+    -   Pre-roll buffer captures 20 frames before motion detected
+    -   Automatic cooldown (~0.8s) between captures
+-   **Message Type Filtering**: Multi-stream device support
+    -   Filter specific data types from devices like Muse 2 (EEG, PPG, accelerometer, gyroscope)
+    -   Select only the sensor streams you need for training
+-   **No-Code Interface**: Add classes, rename labels, and tune hyperparameters with a sleek UI
+-   **Live Visualizers**: Real-time oscilloscope views, confidence meters, loss/accuracy curves, and regression bars
+-   **Flexible Deployment**: Stream predictions to creative tools
+    -   **OSC Broadcasting**: Send to TouchDesigner, Unity, Max/MSP (`127.0.0.1:12000`)
+    -   **WebSocket**: Real-time browser integration via Socket.IO (`localhost:3100`)
+    -   **Serial Bridge**: Route predictions back to Arduino/ESP32 devices
+
+---
+
+## Why ML Bridge?
+
+Traditional machine learning requires Python environments, library installations, and code-heavy workflows. ML Bridge removes these barriers for creative coders, educators, and interaction designers.
+
+| Feature | Traditional ML (Python/Jupyter) | ML Bridge |
+|---------|--------------------------------|-----------|
+| **Setup** | Install Python, Jupyter, TensorFlow, scikit-learn | Download app, double-click to launch |
+| **Training Time** | Minutes to hours | Seconds (KNN) or ~30s (Dense) |
+| **Deployment** | Export model, write integration code | Built-in OSC/WebSocket/Serial output |
+| **Use Case** | Research, production ML systems | Creative coding, prototyping, installations, education |
+| **Learning Curve** | Steep (Python, ML concepts, APIs) | Gentle (visual interface, instant feedback) |
+
+> [!TIP]
+> **Best for**: Interactive installations, creative coding workshops, physical computing projects, real-time performance systems, rapid prototyping of ML-powered interfaces.
+
+---
 
 ## The Two Workflows
 
@@ -135,26 +169,88 @@ npm run electron:build
 ## Quick Start
 
 ### 1. Select Input Source
+
 In the top header, select your data source:
-*   **SERIAL BRIDGE**: Auto-connects to the main app (port 3000) to receive sensor data.
-*   **WEBCAM**: Uses your camera. ML Bridge automatically crops and downsamples the image.
-    *   **Switch Camera**: Hover over the webcam preview and click the ⚙️ icon to select a different camera source.
+
+-   **SERIAL BRIDGE**: Auto-connects to Serial Bridge (scans ports 3000-3010) to receive sensor data from Arduino/ESP32
+-   **WEBCAM**: Uses your camera for vision-based training
+    -   ML Bridge automatically crops and downsamples to 64x64 grayscale (4096 features)
+    -   **Switch Camera**: Hover over the webcam preview and click the ⚙️ icon to select a different camera
+-   **OSC**: Receive data from TouchDesigner, Max/MSP, or other OSC apps
+
+> [!TIP]
+> **First time?** Start with **Webcam** - it's the easiest way to experiment without hardware!
+
+---
 
 ### 2. Choose Your Mode
-*   **Classification**: "Discrete" states (e.g., Sitting, Standing, Jumping).
-*   **Regression**: "Continuous" values (e.g., a slider from 0.0 to 1.0 based on how hard you squeeze).
+
+-   **Classification**: Discrete states (e.g., "Sitting", "Standing", "Jumping")
+-   **Regression**: Continuous values (e.g., slider position 0.0-1.0)
+
+---
 
 ### 3. Record Data
-*   **Add Class / Parameter**: Create a bucket for your data (e.g., "Class 1: Neutral").
-*   **Hold to Record**: Click and hold the record button while performing the action.
-*   *Tip: Try to capture variations (slightly different angles/speeds) for a robust model.*
+
+1. **Add Class**: Click "Add Class" and name it (e.g., "Hand Open", "Hand Closed")
+2. **Hold to Record**: Click and hold the record button
+3. **Record 15-20 variations** with different angles, speeds, lighting
+
+> [!TIP]
+> **Quality over Quantity**: 20 varied examples beats 100 identical ones!
+
+---
 
 ### 4. Train & Run
-*   **KNN**: It's always training! Just click **Run**.
-*   **Dense**: Click **"Train Model"**. Watch the Loss curve go down and Accuracy go up.
+
+-   **KNN**: Instant! Just click **Run**
+-   **Dense**: Click **"Train Model"**, watch Loss decrease and Accuracy increase (~30 seconds)
+
+---
 
 ### 5. Monitor
-Switch to the **Deployment** tab (or watch the "Deployment & Monitor" hub). You'll see the live classification and confidence levels.
+
+Switch to the **Deployment** tab to see live predictions with confidence meters.
+
+---
+
+### 6. Use in p5.js
+
+ML Bridge includes a JavaScript library for easy browser integration:
+
+**HTML:**
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.js"></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="http://localhost:3100/ml-bridge.js"></script>
+  <script src="sketch.js"></script>
+</head>
+<body></body>
+</html>
+```
+
+**sketch.js:**
+```javascript
+let ml;
+let currentClass = "Waiting...";
+
+function setup() {
+  createCanvas(600, 400);
+  ml = new MLBridge(); // Auto-connects
+  
+  ml.onPrediction((data) => {
+    if (data.label) currentClass = data.label;
+  });
+}
+
+function draw() {
+  background(20);
+  text(currentClass, width/2, height/2);
+}
+```
 
 ## Concepts & Deep Dive
 
@@ -452,17 +548,124 @@ function draw() {
 
 ## Troubleshooting
 
-**Q: I'm recording but the graph isn't moving.**
-A: Check if the **Serial Bridge** app is running and connected. Verify that `Input Stream` shows "Connected" in green.
+### Connection Issues
 
-**Q: My model predicts "Class 1" for everything.**
-A: You might have **imbalanced data**. Ensure you have roughly the same number of samples for each class.
+**Q: Serial Bridge shows "Disconnected" in ML Bridge**  
+**A:** 
+1. Verify Serial Bridge is running (check system tray/menu bar)
+2. Confirm Serial Bridge is on port 3000 (Settings → WebSocket Server)
+3. Restart ML Bridge - it scans ports 3000-3010 on launch
+4. Check firewall isn't blocking localhost
 
-**Q: Regression is jittery.**
-A: Regression is sensitive. Increase the number of recorded samples to smooth out the noise, or use the **Temporal Window** (size ~5) to average out input jitter.
+**Q: Webcam shows black screen**  
+**A:**
+1. Grant camera permissions (System Settings → Privacy → Camera)
+2. Try switching cameras (⚙️ icon in preview)
+3. Close other apps using camera
 
-**Q: "Dimension Mismatch" Error.**
-A: You likely changed the **Input Source** or **Temporal Window** after recording data. The model expects the data shape to always be the same. Clear the model (Trash Icon) and record fresh data.
+---
+
+### Training Issues
+
+**Q: "Dimension Mismatch" error**  
+**A:**
+- **Cause**: Changed temporal window or input after recording
+- **Solution**: Clear all data (trash icon) and re-record
+
+**Q: "Need at least 10 samples per class"**  
+**A:** Dense models need 15-20 examples per class. Try KNN if you have fewer samples.
+
+**Q: Training loss stuck / not decreasing**  
+**A:**
+- Increase learning rate (0.001 → 0.01)
+- Check class balance - all classes need similar counts
+- Reduce temporal window if pattern is simpler
+
+**Q: Model predicts same class for everything**  
+**A:**
+- Balance your dataset - all classes need similar sample counts
+- Record more varied examples (angles, speeds, positions)
+
+**Q: I'm recording but the graph isn't moving.**  
+**A:** Check Input Stream shows "Connected" (green). For Serial Bridge, verify device is sending data.
+
+---
+
+### Performance Issues
+
+**Q: Webcam is very slow**  
+**A:** Webcam = 4096 features. Use sensors (6-20 features) for real-time. Try KNN over Dense.
+
+**Q: Predictions are jittery**  
+**A:**
+- Classification: Use Dense (has built-in smoothing)
+- Regression: Record more samples, use temporal window 3-5
+
+---
+
+### Deployment Issues
+
+**Q: Arduino not receiving predictions**  
+**A:**
+1. Verify Device ID matches in ML Bridge and Serial Bridge
+2. Check Serial Bridge connection is active
+3. Try switching JSON ↔ CSV format
+4. Open Arduino Serial Monitor (115200 baud) to check data
+
+**Q: p5.js shows "Waiting..." forever**  
+**A:**
+1. Ensure ML Bridge is running with model predicting (green Run button)
+2. Check browser console for errors (F12)
+3. Verify loading `http://localhost:3100/ml-bridge.js`
+4. Socket.IO must load BEFORE ml-bridge.js
+
+---
+
+**Still stuck?** Open an issue on [GitHub](https://github.com/IrtizaNasar/ml-bridge/issues) with your OS, ML Bridge version, and steps to reproduce.
+
+---
+
+## Configuration Reference
+
+Document all configurable settings in ML Bridge:
+
+| Setting | Location | Default | Range | Description |
+|---------|----------|---------|-------|-------------|
+| **Temporal Window** | Training Config | 1 | 1-20 | Number of frames for gesture recognition |
+| **Epochs** | Training Config (Dense) | 50 | 10-200 | Training iterations for neural network |
+| **Learning Rate** | Training Config (Dense) | 0.001 | 0.0001-0.1 | Speed of learning (higher = faster but less stable) |
+| **Batch Size** | Training Config (Dense) | 16 | 8-64 | Samples processed per training step |
+| **K Value** | Training Config (KNN) | 20 | 1-100 | Number of nearest neighbors to consider |
+| **Auto-Capture Threshold** | Training Config | 0.167 | 0.0-1.0 | Motion detection sensitivity for hands-free recording |
+
+> [!NOTE]
+> Changes to Temporal Window require clearing all data and re-recording. All other settings can be adjusted between training runs.
+
+---
+
+## Built With
+
+- [Electron](https://electronjs.org) - Cross-platform desktop framework
+- [React](https://react.dev) - User interface library
+- [TensorFlow.js](https://www.tensorflow.org/js) - Machine learning in JavaScript
+- [KNN Classifier](https://github.com/tensorflow/tfjs-models/tree/master/knn-classifier) - Real-time classification model
+- [Socket.IO](https://socket.io) - WebSocket communication
+- [Node-OSC](https://github.com/MylesBorins/node-osc) - OSC protocol implementation
+
+---
+
+## Contributing
+
+We welcome contributions! Here's how:
+
+- **Report Bugs**: [GitHub Issues](https://github.com/IrtizaNasar/ml-bridge/issues)
+- **Feature Requests**: [Discussions](https://github.com/IrtizaNasar/ml-bridge/discussions)
+- **Pull Requests**: Fork the repo, make changes, submit PR
+  - Follow existing code style
+  - Test thoroughly before submitting
+  - Include description of changes
+
+---
 
 ## License
 
