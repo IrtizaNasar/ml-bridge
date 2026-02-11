@@ -111,15 +111,13 @@ class MLEngine {
 
             tensor.dispose();
 
-            // Apply prediction smoothing
-            const classArray = Array.from(this.classes).sort();
-            const rawPrediction = {
+            // KNN already has built-in stability via K=20 neighbor voting.
+            // No additional smoothing/cooldown needed — return raw result for instant response.
+            return {
                 label: result.label,
                 confidence: result.confidence,
-                confidences: result.confidences || {},
-                timestamp: Date.now()
+                confidences: result.confidences || {}
             };
-            return this._smoothPrediction(rawPrediction, classArray);
         } catch (e) {
             tensor.dispose();
             return null;
@@ -224,8 +222,8 @@ class MLEngine {
 
                 if (predictedVal !== null) {
                     // Exponential Moving Average (EMA) smoothing
-                    // alpha = 0.15: 15% new value, 85% previous value for stability
-                    const alpha = 0.15;
+                    // alpha = 0.4: 40% new value, 60% previous — responsive yet stable
+                    const alpha = 0.4;
                     const previous = this.previousRegressionValues[outId] !== undefined
                         ? this.previousRegressionValues[outId]
                         : predictedVal;
@@ -535,7 +533,7 @@ class MLEngine {
             if (this.regressionOutputIds && this.regressionOutputIds.length === data.length) {
                 this.regressionOutputIds.forEach((id, idx) => {
                     // Apply EMA smoothing
-                    const alpha = 0.15; // 15% new value, 85% previous value for stability
+                    const alpha = 0.4; // 40% new value, 60% previous — responsive yet stable
                     const rawValue = data[idx];
                     const previous = this.previousRegressionValues[id] !== undefined
                         ? this.previousRegressionValues[id]
@@ -1126,16 +1124,17 @@ class MLEngine {
                     if (sample.type === 'classification' || sample.type === 'dense') {
                         this.classifier.addExample(tensor, sample.label);
                         this.classes.add(sample.label);
+                        tensor.dispose();
                     } else if (sample.type === 'regression') {
                         if (!this.regressionData[sample.label]) {
                             this.regressionData[sample.label] = [];
                         }
                         this.regressionData[sample.label].push({
-                            tensor: tensor.clone(),
+                            tensor: tensor,
                             target: sample.target
                         });
+                        // Don't dispose — tensor is stored for regression predictions
                     }
-                    tensor.dispose();
                 });
             } else {
                 // Legacy path: no unifiedDataset — load from serialized KNN tensors.
