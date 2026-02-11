@@ -60,9 +60,7 @@ export function Visualizer({ data, selectedFeatures, width = 300, height = 100 }
 
         if (activeKeys.length === 0) return;
 
-        if (activeKeys.length === 0) return;
-
-        // Cinematic colors
+        // Color palette matching feature sidebar colors
         const colors = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
         // --- 3. DRAW CINEMATIC LINES ---

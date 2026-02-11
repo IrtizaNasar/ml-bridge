@@ -28,8 +28,7 @@ contextBridge.exposeInMainWorld('api', {
         start: (port) => ipcRenderer.invoke('osc-start', port),
         stop: () => ipcRenderer.invoke('osc-stop'),
         onData: (callback) => {
-            // Remove existing listener to avoid dupes? Or just add
-            // For simplicity, we just add. Cleanup is up to caller logic or app reloads.
+            // Listeners accumulate across source switches; cleaned up on app reload
             ipcRenderer.on('osc-data', (event, data) => callback(data));
         },
         send: (ip, port, address, args) => ipcRenderer.invoke('osc-send', ip, port, address, args)

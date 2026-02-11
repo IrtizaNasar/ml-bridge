@@ -91,7 +91,7 @@ export function DataView({ onLoad, onSave, onDeleteSample, classes = [], engine 
         setIsProcessing(false);
     };
 
-    // PERFORMANCE: Memoize filtered samples to avoid recalculating on every render
+    // Memoize filtered samples to avoid recalculating on every render
     const filteredSamples = useMemo(() => {
         return allSamples.filter(s => {
             if (!s) return false;

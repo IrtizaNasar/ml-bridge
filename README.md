@@ -24,6 +24,8 @@ It is designed to sit perfectly between **Serial Bridge** (for hardware data) an
 - [The Two Workflows](#the-two-workflows)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [App Layout](#app-layout)
+- [Your First Project (5 minutes)](#your-first-project-5-minutes)
 - [Concepts & Deep Dive](#concepts--deep-dive)
   - [Input Sources](#input-sources)
   - [Classification vs. Regression](#classification-vs-regression)
@@ -34,18 +36,19 @@ It is designed to sit perfectly between **Serial Bridge** (for hardware data) an
   - [Arduino Integration](#arduino-integration)
   - [WebSocket Output](#websocket-output)
 - [Troubleshooting](#troubleshooting)
+- [Configuration Reference](#configuration-reference)
 
 ## Features
 
 -   **Universal Input**: Seamlessly ingest data from multiple sources
     -   **Serial Bridge**: Connect Arduino/ESP32 sensors via Serial Bridge (auto-discovers ports 3000-3010)
-    -   **Webcam**: Train on camera input (automatically preprocessed to 64x64 grayscale, 4096 features)
+    -   **Webcam**: Train on camera input using MobileNet v2 transfer learning (1280-dimensional embeddings)
     -   **OSC**: Receive data from TouchDesigner, Max/MSP, or other OSC-enabled applications
 -   **Dual ML Engines**:
     -   **KNN (K-Nearest Neighbors)**: Instant training with zero wait time - perfect for rapid prototyping and real-time exploration
     -   **Dense (Neural Network)**: Powerful deep learning for complex patterns - trains in ~30 seconds for production-ready gesture recognition
 -   **Temporal Windowing**: Train **gestures** (swipes, waves, shapes) not just static poses
-    -   Configurable 1-20 frame window for capturing motion over time
+    -   Configurable 1-50 frame window for capturing motion over time
     -   Built-in time-series buffer for gesture sequence recognition
 -   **Auto-Capture**: Motion detection for hands-free training
     -   Threshold slider for sensitivity control (default 0.167)
@@ -95,7 +98,7 @@ We designed ML Bridge to support two distinct creative workflows:
 ### 2. The Interaction (Gesture Recognition)
 **Goal**: *Detect a "Magic Swipe" vs a "Circle" motion.*
 *   **Feature**: Temporal Windowing.
-*   **Process**: You increase the **Temporal Window** slider to `20 frames`. The engine now "sees" video clips of your data instead of photos. You record the motion.
+*   **Process**: You increase the **Temporal Window** slider (up to 50 frames). The engine now "sees" video clips of your data instead of photos. You record the motion.
 *   **Result**: The system recognizes the *evolution* of the data over time, allowing for complex gesture control.
 
 ## Installation
@@ -174,7 +177,7 @@ In the top header, select your data source:
 
 -   **SERIAL BRIDGE**: Auto-connects to Serial Bridge (scans ports 3000-3010) to receive sensor data from Arduino/ESP32
 -   **WEBCAM**: Uses your camera for vision-based training
-    -   ML Bridge automatically crops and downsamples to 64x64 grayscale (4096 features)
+    -   ML Bridge uses MobileNet v2 to extract 1280 visual features (transfer learning)
     -   **Switch Camera**: Hover over the webcam preview and click the ⚙️ icon to select a different camera
 -   **OSC**: Receive data from TouchDesigner, Max/MSP, or other OSC apps
 
@@ -252,6 +255,44 @@ function draw() {
 }
 ```
 
+## App Layout
+
+ML Bridge has **3 tabs** in the left sidebar:
+
+| Tab | Purpose |
+|-----|---------|
+| **Main Screen** | Start screen — choose your input source and mode |
+| **TRAINING** | Main workspace — record data, add classes, configure settings, train & run models |
+| **DATASET** | Browse and manage all recorded samples per class |
+
+> [!TIP]
+> You'll spend most of your time in the **TRAINING** tab. Start there after selecting your input source in HUB.
+
+---
+
+## Your First Project (5 minutes)
+
+New to ML Bridge? Follow this step-by-step walkthrough using your webcam:
+
+1. **Open ML Bridge** and go to the **HUB** tab
+2. Click **WEBCAM** as your input source — you should see your camera feed
+3. Make sure **Classification** mode is selected (not Regression)
+4. Go to the **TRAINING** tab
+5. You'll see a default class called "Class 1" — rename it to **"Thumbs Up"**
+6. Click **"Add Class"** and name the second class **"Open Hand"**
+7. **Record data**: Hold the record button (●) while showing a thumbs up — do this ~15-20 times with slight variations (angle, distance, hand position)
+8. Switch to "Open Hand" and record ~15-20 examples of an open palm
+9. **Choose your engine**:
+   - **KNN**: Click **Run** — predictions start instantly!
+   - **Dense**: Click **Train Model**, wait ~30 seconds, then click **Run**
+10. Show different hand gestures to see live predictions with confidence scores
+11. **Deploy**: Go to the **Deploy** tab (⚡ icon in sidebar) to send predictions via OSC or WebSocket to your creative tools
+
+> [!TIP]
+> **Not working well?** Make sure your examples have variety — different angles, distances, and lighting. 15-20 *varied* samples beats 50 identical ones.
+
+---
+
 ## Concepts & Deep Dive
 
 ### Input Sources
@@ -259,8 +300,8 @@ function draw() {
 *   **Serial Bridge Link**: The app listens for `serial-data` events from `localhost:3000`. It treats **every numeric value** in the JSON packet as a feature.
     *   *Example*: `{ "x": 10, "y": 20 }` &rarr; Model sees `[10, 20]`.
     *   *Feature Selection*: You can uncheck specific keys in the **Input Card** to ignore noisy sensors.
-*   **Webcam**: The image is resized to `64x64`, converted to grayscale, and flattened.
-    *   *Note*: This creates 4096 features! Training will be slower than with sensors.
+*   **Webcam**: The image is processed by MobileNet v2 (224×224 input), producing a 1280-dimensional embedding vector.
+    *   *Note*: Transfer learning via MobileNet means the model sees high-level visual features, not raw pixels.
 
 ### Classification vs. Regression
 
@@ -277,7 +318,7 @@ Standard ML looks at a **Snapshot** (1 frame). This works for "Poses" (static st
 To detect "Gestures" (movement), you need **Time**.
 
 *   **The Slider**: In "Training Config", increasing the **Temporal Window** (e.g., to 20) creates a buffer.
-*   **How it works**: When window = 20, the model receives `[Data_t, Data_t-1, ... Data_t-19]`. It sees the last 20 samples at once.
+*   **How it works**: When window = 20, the model receives `[Data_t, Data_t-1, ... Data_t-19]`. It sees the last 20 samples at once. Window can go up to 50 frames.
 *   **Trade-off**: Larger windows capture longer gestures but increase "Lag" (latency) because the gesture must finish before it matches the pattern.
 
 ### KNN vs. Dense Engines
@@ -285,7 +326,7 @@ To detect "Gestures" (movement), you need **Time**.
 | Engine | Type | Training Time | Exportable? | Best For... |
 | :--- | :--- | :--- | :--- | :--- |
 | **KNN** | k-Nearest Neighbors | Instant (0s) | No | Prototyping, Regression, fast experiments. |
-| **Dense** | Neural Network | Slow (10s - 2m) | **No** | Complex projects. Can distinguish very similar gestures better than KNN. |
+| **Dense** | Neural Network | Slow (10s - 2m) | No | Complex projects. Can distinguish very similar gestures better than KNN. |
 
 ## Deployment
 
@@ -573,7 +614,7 @@ function draw() {
 - **Solution**: Clear all data (trash icon) and re-record
 
 **Q: "Need at least 10 samples per class"**  
-**A:** Dense models need 15-20 examples per class. Try KNN if you have fewer samples.
+**A:** Dense models require a minimum of 10 examples per class to train. For best results, record 15-20 varied examples. Try KNN if you want instant predictions with fewer samples.
 
 **Q: Training loss stuck / not decreasing**  
 **A:**
@@ -594,11 +635,12 @@ function draw() {
 ### Performance Issues
 
 **Q: Webcam is very slow**  
-**A:** Webcam = 4096 features. Use sensors (6-20 features) for real-time. Try KNN over Dense.
+**A:** Webcam uses MobileNet inference per frame which can be heavy. Ensure WebGL is enabled (check console for "WebGL enabled"). Try KNN over Dense for faster response.
 
 **Q: Predictions are jittery**  
 **A:**
-- Classification: Use Dense (has built-in smoothing)
+- Classification (Dense): Tune **Prediction Stability** settings — increase Smoothing Window or Confidence Threshold in Training Config
+- Classification (KNN): Built-in majority voting smoothing is applied automatically
 - Regression: Record more samples, use temporal window 3-5
 
 ---
@@ -627,16 +669,18 @@ function draw() {
 
 ## Configuration Reference
 
-Document all configurable settings in ML Bridge:
+All configurable settings available in the Training Config panel:
 
 | Setting | Location | Default | Range | Description |
 |---------|----------|---------|-------|-------------|
-| **Temporal Window** | Training Config | 1 | 1-20 | Number of frames for gesture recognition |
-| **Epochs** | Training Config (Dense) | 50 | 10-200 | Training iterations for neural network |
-| **Learning Rate** | Training Config (Dense) | 0.001 | 0.0001-0.1 | Speed of learning (higher = faster but less stable) |
-| **Batch Size** | Training Config (Dense) | 16 | 8-64 | Samples processed per training step |
-| **K Value** | Training Config (KNN) | 20 | 1-100 | Number of nearest neighbors to consider |
-| **Auto-Capture Threshold** | Training Config | 0.167 | 0.0-1.0 | Motion detection sensitivity for hands-free recording |
+| **Temporal Window** | Training Config | 1 | 1-50 | Number of frames for gesture recognition |
+| **Epochs** | Training Config (Dense) | 150 | 1-500+ | Training iterations for neural network |
+| **Learning Rate** | Training Config (Dense) | 0.01 | 0.0001-0.1 | Speed of learning (higher = faster but less stable) |
+| **Batch Size** | Training Config (Dense) | 16 | 1-64+ | Samples processed per training step |
+| **Confidence Threshold** | Training Config (Dense) | 0.65 | 0-1.0 | Minimum confidence to accept a prediction |
+| **Smoothing Window** | Training Config (Dense) | 7 | 1-20 | Majority vote over N frames for stable output |
+| **Prediction Cooldown** | Training Config (Dense) | 200ms | 0-1000ms | Minimum time between prediction changes |
+| **Auto-Capture Threshold** | Training Config | 0.167 | 0.05-1.5 | Motion detection sensitivity for hands-free recording |
 
 > [!NOTE]
 > Changes to Temporal Window require clearing all data and re-recording. All other settings can be adjusted between training runs.

@@ -1,5 +1,6 @@
 
 import { io } from "socket.io-client";
+import { updateFeatureRange } from "./normalization";
 import { webcamManager } from "./WebcamManager";
 
 /**
@@ -56,8 +57,6 @@ class InputManager {
     }
 
     setSource(source) {
-
-
         // Teardown previous
         if (this.currentSource === 'serial') this.disconnectSocket();
         if (this.currentSource === 'webcam') webcamManager.stop();
@@ -330,9 +329,12 @@ class InputManager {
         // Flatten nested objects/arrays
         const flattened = this._flattenObject(data);
 
-        // Track active inputs
-        Object.keys(flattened).forEach(k => {
+        // Track active inputs and update adaptive normalization ranges
+        Object.entries(flattened).forEach(([k, v]) => {
             this.activeInputs.add(k);
+            if (typeof v === 'number') {
+                updateFeatureRange(k, v);
+            }
         });
 
         // Emit to all callbacks immediately (no throttling here)
@@ -426,7 +428,11 @@ class InputManager {
     async convertImageToFeatures(file) {
         return new Promise((resolve, reject) => {
             const img = new Image();
+            const objectUrl = URL.createObjectURL(file);
             img.onload = () => {
+                // Revoke object URL to free memory
+                URL.revokeObjectURL(objectUrl);
+
                 // Resize to Match Webcam (64x64)
                 const canvas = document.createElement('canvas');
                 canvas.width = 64;
@@ -446,8 +452,11 @@ class InputManager {
 
                 resolve({ features, thumbnail: canvas.toDataURL() });
             };
-            img.onerror = reject;
-            img.src = URL.createObjectURL(file);
+            img.onerror = (err) => {
+                URL.revokeObjectURL(objectUrl);
+                reject(err);
+            };
+            img.src = objectUrl;
         });
     }
 }

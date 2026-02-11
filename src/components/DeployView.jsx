@@ -12,11 +12,9 @@ export function DeployView({
     serialFormat, setSerialFormat, // Lifted state from App.jsx
 
     onExportWeb,
-    classes = [] // Add classes prop
+    classes = []
 }) {
-    // const [protocol, setProtocol] = useState('osc'); // REMOVED - now props
     const [wsStatus, setWsStatus] = useState('disconnected');
-    // const [targetDeviceId, setTargetDeviceId] = useState(''); // REMOVED - now props
     const [logs, setLogs] = useState(['[SYSTEM] Bridge Ready.']);
 
     // Create map for ID -> Name lookup
@@ -39,14 +37,8 @@ export function DeployView({
         setLogs(prev => [...prev.slice(-49), `[CONFIG] Protocol set to ${p?.id.toUpperCase()}`]);
     }, [protocol]);
 
-    // Mock export latency
-    const latency = Math.floor(Math.random() * 5) + 8;
-
     return (
         <div className="h-full flex flex-col bg-[#0A0A0A] text-zinc-300 animate-in fade-in zoom-in-95 duration-200 overflow-hidden relative">
-
-            {/* Background Viz - REMOVED for Windows performance */}
-            {/* Full-screen canvas rendering was causing severe lag on Windows */}
 
             {/* Header */}
             <div className="relative z-10 flex items-center justify-between p-6 border-b border-[#222] bg-[#0A0A0A]">
@@ -128,16 +120,16 @@ export function DeployView({
                         </div>
                     </div>
 
-                    {/* Latency Stats */}
+                    {/* Status Indicator */}
                     {isRunning && (
                         <div className="absolute bottom-8 flex gap-8">
                             <div className="text-center">
-                                <div className="text-[10px] uppercase text-zinc-600 font-bold tracking-wider mb-1">Inference</div>
-                                <div className="text-lg font-mono text-zinc-300">~{latency}ms</div>
+                                <div className="text-[10px] uppercase text-zinc-600 font-bold tracking-wider mb-1">Engine</div>
+                                <div className="text-lg font-mono text-emerald-400">LIVE</div>
                             </div>
                             <div className="text-center">
-                                <div className="text-[10px] uppercase text-zinc-600 font-bold tracking-wider mb-1">FPS</div>
-                                <div className="text-lg font-mono text-zinc-300">60</div>
+                                <div className="text-[10px] uppercase text-zinc-600 font-bold tracking-wider mb-1">Protocol</div>
+                                <div className="text-lg font-mono text-zinc-300">{protocol.toUpperCase()}</div>
                             </div>
                         </div>
                     )}

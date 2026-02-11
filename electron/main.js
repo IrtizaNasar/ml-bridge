@@ -240,12 +240,8 @@ async function findSerialBridge() {
     return null;
 }
 
-// Periodic scan if not connected
+// Re-scan for Serial Bridge every 5 seconds (auto-discovery)
 setInterval(() => {
-    // Re-scan every 5 seconds if we haven't sent data successfully recently?
-    // Or just let the user retry manually?
-    // For now, let's scan if we think we are disconnected AND the user tries to connect?
-    // Actually, simple background scan is better.
     findSerialBridge();
 }, 5000);
 
@@ -358,8 +354,6 @@ ipcMain.handle('serial-bridge-connect', () => {
 });
 
 ipcMain.handle('serial-bridge-disconnect', () => {
-    // "Disconnect" just means stop trying to send? 
-    // For now, let's just say disconnected
     serialBridgeConnected = false;
     return { success: true };
 });
@@ -436,7 +430,7 @@ ipcMain.handle('osc-start', async (event, port = 12000) => {
 
         console.log(`[Main] Starting OSC Server on port ${port}...`);
 
-        // Try 0.0.0.0 first (allows external connections from TouchOSC, Wekinator, etc.)
+        // Try 0.0.0.0 first (allows external connections), fall back to 127.0.0.1
         // Fall back to 127.0.0.1 if 0.0.0.0 isn't available
         const hosts = ['0.0.0.0', '127.0.0.1'];
         let lastError = null;

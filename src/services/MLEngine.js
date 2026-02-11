@@ -1,7 +1,7 @@
 import * as tf from '@tensorflow/tfjs';
 import * as knn from '@tensorflow-models/knn-classifier';
 import JSZip from 'jszip';
-import { detectDataType, normalizeValue } from './normalization';
+import { detectDataType, normalizeValue, resetFeatureRanges, computeFeatureStats, normalizeWithStats } from './normalization';
 
 /**
  * MLEngine
@@ -20,18 +20,22 @@ class MLEngine {
         this.denseModelType = null; // 'classification' or 'regression'
         this.regressionOutputIds = null; // Array of output IDs in order for regression models
 
+        // --- Feature Stats (per-feature min/max from training data) ---
+        // Computed from denseData at rebuild/training time, used for prediction.
+        this.featureStats = null;
+        this.knnDirty = false; // Flag: KNN needs rebuild before next prediction
+
         // --- Temporal Support (Gestures) ---
         this.history = [];
         this.windowSize = 1; // Default: Single snapshot
 
         // --- Prediction Smoothing (for stable gesture recognition) ---
-        // Based on Tiny Motion Trainer approach: majority voting + cooldown
-        this.predictionHistory = []; // Store last N predictions for majority voting
-        this.smoothingWindow = 7; // Number of predictions for majority vote (TMT uses 5-10)
-        this.confidenceThreshold = 0.65; // Minimum confidence to show prediction (65% - TMT uses 60%)
-        this.lastStablePrediction = null; // Last high-confidence prediction
-        this.lastPredictionChangeTime = 0; // Timestamp of last prediction change
-        this.predictionCooldown = 200; // Minimum ms between prediction changes (TMT uses 125-200ms)
+        this.predictionHistory = [];
+        this.smoothingWindow = 7;
+        this.confidenceThreshold = 0.65;
+        this.lastStablePrediction = null;
+        this.lastPredictionChangeTime = 0;
+        this.predictionCooldown = 200;
     }
 
     /**
@@ -44,7 +48,6 @@ class MLEngine {
     }
 
     // --- Classification (KNN) ---
-    // Kept for backward compatibility and fast prototyping
     /**
      * Adds a classification example to the KNN classifier
      * @param {Object} inputData - Raw input data
@@ -54,24 +57,26 @@ class MLEngine {
      */
     addClassificationExample(inputData, classId, features, thumbnail = null) {
         if (!inputData) return;
-        const tensor = this._toTensor(inputData, features);
-        if (tensor) {
-            // KNN Internal Storage
-            this.classifier.addExample(tensor, classId);
-            this.classes.add(classId);
 
-            // Unified Hub Storage
-            const vals = Array.from(tensor.dataSync());
-            this.denseData.push({
-                features: vals,
-                label: classId,
-                type: 'classification',
-                thumbnail: thumbnail,
-                timestamp: Date.now()
-            });
+        // Get features (raw for sensor type, type-normalized for image/imu/eeg)
+        const baseTensor = this._toTensor(inputData, features, 'auto', false);
+        if (!baseTensor) return;
 
-            tensor.dispose();
-        }
+        const baseVals = Array.from(baseTensor.dataSync());
+        baseTensor.dispose();
+
+        // Store in unified data (raw for sensors, type-normalized for image/imu/eeg)
+        this.denseData.push({
+            features: baseVals,
+            label: classId,
+            type: 'classification',
+            thumbnail: thumbnail,
+            timestamp: Date.now()
+        });
+        this.classes.add(classId);
+
+        // Mark KNN as needing rebuild (lazy: rebuilt before next prediction)
+        this.knnDirty = true;
     }
 
     /**
@@ -81,19 +86,22 @@ class MLEngine {
      * @returns {Promise<Object>} Prediction result { label, confidence, confidences }
      */
     async predictClassification(inputData, features) {
+        // Lazy rebuild: ensure KNN is in sync with latest denseData + stats
+        this._ensureKnnRebuilt();
+
         if (this.classifier.getNumClasses() === 0) return null;
-        const tensor = this._toTensor(inputData, features);
+
+        // Normalize using training-data stats, then pad for KNN
+        const tensor = this._toTensor(inputData, features, 'auto', true, this.featureStats);
         if (!tensor) return null;
         try {
             const result = await this.classifier.predictClass(tensor, 20);
 
             // Normalize output to match Dense Engine (add top-level confidence)
             if (result.confidences) {
-                // Try direct lookup
                 if (result.label && result.confidences[result.label] !== undefined) {
                     result.confidence = result.confidences[result.label];
                 } else {
-                    // Fallback: Find max confidence manually
                     const values = Object.values(result.confidences || {});
                     result.confidence = values.length > 0 ? Math.max(...values) : 0;
                 }
@@ -101,10 +109,17 @@ class MLEngine {
                 result.confidence = 0;
             }
 
-
-
             tensor.dispose();
-            return result;
+
+            // Apply prediction smoothing
+            const classArray = Array.from(this.classes).sort();
+            const rawPrediction = {
+                label: result.label,
+                confidence: result.confidence,
+                confidences: result.confidences || {},
+                timestamp: Date.now()
+            };
+            return this._smoothPrediction(rawPrediction, classArray);
         } catch (e) {
             tensor.dispose();
             return null;
@@ -124,22 +139,26 @@ class MLEngine {
         if (!this.regressionData[outputId]) {
             this.regressionData[outputId] = [];
         }
-        const tensor = this._toTensor(inputData, features);
-        if (tensor) {
-            // KNN Regression Storage
-            this.regressionData[outputId].push({ tensor, target: targetValue });
 
-            // Unified Hub Storage
-            const vals = Array.from(tensor.dataSync());
-            this.denseData.push({
-                features: vals,
-                label: outputId,
-                target: targetValue,
-                type: 'regression',
-                thumbnail: thumbnail,
-                timestamp: Date.now()
-            });
-        }
+        // Get features (raw for sensor type, type-normalized for image/imu/eeg)
+        const baseTensor = this._toTensor(inputData, features, 'auto', false);
+        if (!baseTensor) return;
+
+        const vals = Array.from(baseTensor.dataSync());
+        baseTensor.dispose();
+
+        // Store raw/type-normalized features
+        this.denseData.push({
+            features: vals,
+            label: outputId,
+            target: targetValue,
+            type: 'regression',
+            thumbnail: thumbnail,
+            timestamp: Date.now()
+        });
+
+        // Mark KNN as needing rebuild (lazy: rebuilt before next prediction)
+        this.knnDirty = true;
     }
 
     /**
@@ -149,7 +168,11 @@ class MLEngine {
      * @returns {Promise<Object>} Prediction result map { outputId: value }
      */
     async predictRegression(inputData, features) {
-        const inputTensor = this._toTensor(inputData, features);
+        // Lazy rebuild: ensure KNN regression data is in sync with latest denseData + stats
+        this._ensureKnnRebuilt();
+
+        // Normalize using training-data stats, then pad for KNN
+        const inputTensor = this._toTensor(inputData, features, 'auto', true, this.featureStats);
         if (!inputTensor) return null;
 
         const result = {};
@@ -244,8 +267,8 @@ class MLEngine {
             featureVector = this._normalizeSequence(inputData, features, dataType);
             if (!featureVector) return;
         } else {
-            // Single sample - use existing logic
-            const tensor = this._toTensor(inputData, features, dataType);
+            // Single sample - don't pad 1D vectors (DNN uses Euclidean distance, not cosine)
+            const tensor = this._toTensor(inputData, features, dataType, false);
             if (!tensor) return;
             featureVector = Array.from(tensor.dataSync());
             tensor.dispose();
@@ -308,17 +331,17 @@ class MLEngine {
             if (minSamples < 10) {
                 this.isTraining = false;
                 const minClass = Object.keys(classCounts).find(k => classCounts[k] === minSamples);
-                return { success: false, error: `Class "${minClass}" has only ${minSamples} samples. Need at least 10 samples per class for robust gesture recognition.` };
+                return { success: false, error: `Class "${minClass}" has only ${minSamples} samples. Need at least 10 samples per class for reliable training.` };
             }
 
             // Warn about class imbalance (but don't block training)
             if (maxSamples / minSamples > 3) {
-                console.warn(`⚠️ Class imbalance detected: max/min ratio is ${(maxSamples / minSamples).toFixed(1)}x. Consider collecting more samples for minority classes.`);
+                console.warn(`[MLEngine] Class imbalance detected: max/min ratio is ${(maxSamples / minSamples).toFixed(1)}x. Consider collecting more samples for minority classes.`);
             }
         }
 
 
-        // ADDED: Validate all samples have consistent feature dimensions
+        // Validate all samples have consistent feature dimensions
         const firstShape = filteredData[0].features.length;
         const shapeMismatch = filteredData.find(d => d.features.length !== firstShape);
 
@@ -331,7 +354,17 @@ class MLEngine {
         }
 
         const inputShape = filteredData[0].features.length;
-        const xs = tf.tensor2d(filteredData.map(d => d.features));
+
+        // Compute per-feature min/max stats from training data.
+        // These stats are stored and used for prediction normalization too.
+        this.featureStats = computeFeatureStats(filteredData);
+
+        // Normalize all training features using the computed stats
+        const normalizedFeatures = filteredData.map(d =>
+            this.featureStats ? normalizeWithStats(d.features, this.featureStats) : d.features
+        );
+
+        const xs = tf.tensor2d(normalizedFeatures);
 
         let ys, outputUnits, outputActivation, lossFunction, metricsArray;
 
@@ -351,49 +384,47 @@ class MLEngine {
             lossFunction = 'categoricalCrossentropy';
             metricsArray = ['accuracy'];
         } else {
-            // Regression mode - support multi-output
-            // Group samples by timestamp to collect all output targets for each sample
-            const samplesByTimestamp = {};
-            const outputIds = new Set();
-
-            filteredData.forEach(d => {
-                const ts = d.timestamp;
-                if (!samplesByTimestamp[ts]) {
-                    samplesByTimestamp[ts] = {
-                        features: d.features,
-                        targets: {}
-                    };
-                }
-                // d.label is the outputId (e.g., "param1")
-                samplesByTimestamp[ts].targets[d.label] = parseFloat(d.target);
-                outputIds.add(d.label);
-            });
-
-            // Convert to arrays
+            // Regression mode - support single and multi-output
+            const outputIds = new Set(filteredData.map(d => d.label));
             const sortedOutputIds = Array.from(outputIds).sort();
-            // Store output IDs for prediction mapping
             this.regressionOutputIds = sortedOutputIds;
-            const samples = Object.values(samplesByTimestamp);
+            const numOutputs = sortedOutputIds.length;
 
-            // Build feature and target tensors
-            const features = samples.map(s => s.features);
-            const targets = samples.map(s => {
-                // Create target vector with all outputs in consistent order
-                return sortedOutputIds.map(id => s.targets[id] || 0);
-            });
+            let regFeatures, regTargets;
 
-            // Update xs with grouped features
+            if (numOutputs === 1) {
+                // Single output: each sample → one target value (most common case)
+                regFeatures = normalizedFeatures;
+                regTargets = filteredData.map(d => [parseFloat(d.target)]);
+            } else {
+                // Multi-output: each sample was captured for one output independently.
+                // Fill non-targeted outputs with their mean value to avoid pulling toward 0.
+                const outputMeans = {};
+                sortedOutputIds.forEach(id => {
+                    const vals = filteredData.filter(d => d.label === id).map(d => parseFloat(d.target));
+                    outputMeans[id] = vals.length > 0
+                        ? vals.reduce((a, b) => a + b, 0) / vals.length
+                        : 0;
+                });
+
+                regFeatures = normalizedFeatures;
+                regTargets = filteredData.map(d => {
+                    return sortedOutputIds.map(id =>
+                        id === d.label ? parseFloat(d.target) : outputMeans[id]
+                    );
+                });
+            }
+
+            // Dispose the original xs (built from all filteredData) and rebuild
             xs.dispose();
-            const xsGrouped = tf.tensor2d(features);
-
-            ys = tf.tensor2d(targets);
-            outputUnits = sortedOutputIds.length;
+            const xsReg = tf.tensor2d(regFeatures);
+            ys = tf.tensor2d(regTargets);
+            outputUnits = numOutputs;
             outputActivation = 'linear';
             lossFunction = 'meanSquaredError';
             metricsArray = ['mse'];
 
-            // Use grouped features
-            return this._trainModel(xsGrouped, ys, outputUnits, outputActivation, lossFunction, metricsArray, inputShape, onEpochEnd, epochs, learningRate, batchSize);
+            return this._trainModel(xsReg, ys, outputUnits, outputActivation, lossFunction, metricsArray, inputShape, onEpochEnd, epochs, learningRate, batchSize);
         }
 
         // Continue with classification training
@@ -402,11 +433,16 @@ class MLEngine {
 
     async _trainModel(xs, ys, outputUnits, outputActivation, lossFunction, metricsArray, inputShape, onEpochEnd, epochs = 50, learningRate = 0.001, batchSize = 16) {
 
+        // Dispose previous model to prevent GPU memory leak on retrain
+        if (this.denseModel) {
+            this.denseModel.dispose();
+            this.denseModel = null;
+        }
+
         // 2. Create Model
         const model = tf.sequential();
 
-        // Hidden Layer 1 - Standard architecture for gesture recognition
-        // This architecture is proven for gesture recognition
+        // Hidden Layer 1
         model.add(tf.layers.dense({
             units: 50,
             activation: 'relu',
@@ -419,7 +455,7 @@ class MLEngine {
             rate: 0.2
         }));
 
-        // Hidden Layer 2 - Match Tiny Motion Trainer architecture (15 units)
+        // Hidden Layer 2
         model.add(tf.layers.dense({
             units: 15,
             activation: 'relu',
@@ -468,7 +504,9 @@ class MLEngine {
     async predictDense(inputData, features, dataType = 'auto') {
         if (!this.denseModel) return null;
 
-        const tensor = this._toTensor(inputData, features, dataType);
+        // Don't pad 1D - DNN was trained without the KNN cosine-similarity pad
+        // Use featureStats for consistent normalization with training data
+        const tensor = this._toTensor(inputData, features, dataType, false, this.featureStats);
         if (!tensor) return null;
 
         // Shape [1, N]
@@ -486,7 +524,7 @@ class MLEngine {
             const regression = {};
             if (this.regressionOutputIds && this.regressionOutputIds.length === data.length) {
                 this.regressionOutputIds.forEach((id, idx) => {
-                    // Apply EMA smoothing (same as KNN regression)
+                    // Apply EMA smoothing
                     const alpha = 0.15; // 15% new value, 85% previous value for stability
                     const rawValue = data[idx];
                     const previous = this.previousRegressionValues[id] !== undefined
@@ -536,14 +574,19 @@ class MLEngine {
         return this._smoothPrediction(rawPrediction, classArray);
     }
 
-    // Predict on a complete gesture sequence (Tiny Trainer approach)
+    // Predict on a complete gesture sequence
     async predictDenseGesture(gestureSequence, features, dataType = 'auto') {
         if (!this.denseModel) return null;
         if (!gestureSequence || gestureSequence.length === 0) return null;
 
-        // Flatten and normalize the gesture sequence
-        const featureVector = this._normalizeSequence(gestureSequence, features, dataType);
+        // Flatten and normalize the gesture sequence (normalizeValue per element)
+        let featureVector = this._normalizeSequence(gestureSequence, features, dataType);
         if (!featureVector) return null;
+
+        // Apply training-data statistics normalization
+        if (this.featureStats) {
+            featureVector = normalizeWithStats(featureVector, this.featureStats);
+        }
 
         // Create tensor and predict
         const tensor = tf.tensor1d(featureVector);
@@ -638,10 +681,26 @@ class MLEngine {
         this.lastStablePrediction = null;
         this.denseModelType = null;
         this.regressionOutputIds = null;
+
+        // Reset normalization state
+        this.featureStats = null;
+        this.knnDirty = false;
+
+        // Reset adaptive normalization ranges (UI tracking only)
+        resetFeatureRanges();
     }
 
     // --- Utils ---
-    _toTensor(inputData, selectedFeatures, dataType = 'auto') {
+    /**
+     * Converts raw input data into a normalized tensor for ML operations.
+     * @param {Object} inputData - Raw key-value data from sensor
+     * @param {Array<string>} selectedFeatures - Feature keys to include
+     * @param {string} dataType - Data type for normalization
+     * @param {boolean} padSingleDim - Whether to pad 1D vectors (for KNN cosine similarity)
+     * @param {Array|null} featureStats - Per-feature min/max stats for normalization (null = no stats normalization)
+     * @returns {tf.Tensor1D|null} Normalized tensor or null if no valid data
+     */
+    _toTensor(inputData, selectedFeatures, dataType = 'auto', padSingleDim = true, featureStats = null) {
         let keys = [];
         if (selectedFeatures && selectedFeatures.length > 0) {
             keys = selectedFeatures.sort();
@@ -656,20 +715,23 @@ class MLEngine {
             dataType = detectDataType(inputData, keys);
         }
 
-        // Current snapshot - normalize based on data type
+        // Step 1: Type-specific normalization (image/imu/eeg get physical-range normalization,
+        // generic sensors pass through raw)
         let currentValues = keys.map(k => {
             const value = inputData[k] || 0;
-            return normalizeValue(value, dataType);
+            return normalizeValue(value, dataType, k);
         });
 
-        // CRITICAL FIX FOR KNN CLASSIFIER (1D SENSORS)
-        // TFJS KNN uses Cosine Similarity (Angle).
-        // A 1D scalar vector [v] always normalizes to length 1.0 (loss of magnitude).
-        // We PAD 1D vectors with a constant to map Magnitude -> Angle.
-        // [0.1] -> [0.1, 0.5], [0.9] -> [0.9, 0.5].
-        // This makes them distinguishable by angle.
-        if (currentValues.length === 1) {
-            currentValues.push(0.5); // Pad with constant
+        // Step 2: KNN Cosine Similarity fix for 1D scalar vectors.
+        // Only pad when: KNN path requested (padSingleDim), single feature, AND
+        // no temporal windowing (windowed vectors are already multi-dimensional).
+        if (padSingleDim && currentValues.length === 1 && this.windowSize <= 1) {
+            currentValues.push(0.5);
+        }
+
+        // Flush history if dimension changes (e.g., switching between KNN padded and DNN unpadded)
+        if (this.history.length > 0 && this.history[0].length !== currentValues.length) {
+            this.history = [];
         }
 
         // Update history
@@ -678,23 +740,39 @@ class MLEngine {
             this.history.shift();
         }
 
-        // If windowing is enabled, flatten history
+        // Build final feature vector (flatten history if windowed)
+        let finalValues;
         if (this.windowSize > 1) {
             // Fill with zeros if history is not full yet
-            let flattened = [];
+            finalValues = [];
             for (let i = 0; i < this.windowSize; i++) {
                 const snapshot = this.history[this.history.length - 1 - i] || new Array(currentValues.length).fill(0);
-                flattened = [...snapshot, ...flattened]; // Maintain temporal order
+                finalValues = [...snapshot, ...finalValues]; // Maintain temporal order
             }
-            return tf.tensor1d(flattened);
+        } else {
+            finalValues = currentValues;
         }
 
-        return tf.tensor1d(currentValues);
+        // Step 3: Apply training-data statistics normalization after windowing.
+        // The safety guard in normalizeWithStats (i >= stats.length → passthrough)
+        // handles the padded 0.5 dimension correctly.
+        if (featureStats) {
+            finalValues = normalizeWithStats(finalValues, featureStats);
+        }
+
+        return tf.tensor1d(finalValues);
     }
 
 
 
-    // Normalize a sequence of samples (for gesture capture)
+    /**
+     * Normalizes a gesture sequence into a single flat feature vector.
+     * Used for temporal/gesture DNN training and prediction.
+     * @param {Array<Object>} samples - Array of data snapshots
+     * @param {Array<string>} selectedFeatures - Feature keys to include
+     * @param {string} dataType - Data type for normalization
+     * @returns {Array<number>|null} Flat feature vector or null
+     */
     _normalizeSequence(samples, selectedFeatures, dataType = 'auto') {
         let keys = [];
         if (selectedFeatures && selectedFeatures.length > 0) {
@@ -705,24 +783,24 @@ class MLEngine {
 
         if (keys.length === 0) return null;
 
-        // Detect data type from first sample
+        // Detect data type from first sample using imported utility
         if (dataType === 'auto' && samples.length > 0) {
-            dataType = this._detectDataType(samples[0], keys);
+            dataType = detectDataType(samples[0], keys);
         }
 
-        // Flatten sequence: [sample1, sample2, ...] -> [sample1_features..., sample2_features..., ...]
+        // Flatten sequence: [sample1, sample2, ...] -> [sample1_features..., sample2_features...]
         const flattened = [];
         samples.forEach(sample => {
             keys.forEach(k => {
                 const value = sample[k] || 0;
-                flattened.push(this._normalizeValue(value, dataType));
+                flattened.push(normalizeValue(value, dataType, k));
             });
         });
 
         return flattened;
     }
 
-    // Smooth predictions using majority voting + cooldown (Tiny Motion Trainer approach)
+    // Smooth predictions using majority voting + cooldown
     // bypassCooldown: for gesture-triggered predictions, skip cooldown since predictions are already infrequent
     _smoothPrediction(rawPrediction, classArray, bypassCooldown = false) {
         const now = Date.now();
@@ -801,7 +879,7 @@ class MLEngine {
         const currentLabel = this.lastStablePrediction ? this.lastStablePrediction.label : null;
         const shouldUpdate = !currentLabel ||
             majorityLabel === currentLabel ||
-            bypassCooldown || // NEW: bypass cooldown for gesture predictions
+            bypassCooldown ||
             timeSinceLastChange >= this.predictionCooldown;
 
         if (shouldUpdate && avgConfidence >= this.confidenceThreshold) {
@@ -849,70 +927,102 @@ class MLEngine {
         this.predictionCooldown = Math.max(0, Math.min(1000, ms));
     }
 
-    // NOTE: clearAll() is defined earlier in this class (line ~612)
-    // Do not add another clearAll() here - JavaScript will use the last definition
-
     clearClassData(classId) {
-        // Remove from KNN classifier
-        this.classifier.clearClass(classId);
-
-        // Remove from classes set
-        this.classes.delete(classId);
-
-        // Remove from denseData (unified dataset)
         this.denseData = this.denseData.filter(sample => sample.label !== classId);
 
-        console.log(`[MLEngine] Cleared all data for class: ${classId}`);
-    }
-
-
-    classes = new Set();
-
-    removeSample(index) {
-        if (index >= 0 && index < this.denseData.length) {
-            this.denseData.splice(index, 1);
-            this._rebuildKnnState();
-            return true;
-        }
-        return false;
+        // Recompute stats and rebuild KNN from remaining data
+        this.featureStats = this.denseData.length > 0
+            ? computeFeatureStats(this.denseData)
+            : null;
+        this._rebuildKnnState();
     }
 
     getClassCounts() {
-        return this.classifier.getClassExampleCount();
-    }
-
-    getRegressionCounts() {
         const counts = {};
-        Object.entries(this.regressionData).forEach(([id, list]) => {
-            counts[id] = list.length;
+        this.denseData.forEach(d => {
+            if (d.type === 'classification' || d.type === 'dense') {
+                counts[d.label] = (counts[d.label] || 0) + 1;
+            }
         });
         return counts;
     }
 
-    // --- Data Management ---
+    getRegressionCounts() {
+        const counts = {};
+        this.denseData.forEach(d => {
+            if (d.type === 'regression') {
+                counts[d.label] = (counts[d.label] || 0) + 1;
+            }
+        });
+        return counts;
+    }
+
+    /**
+     * Removes a single sample by index and rebuilds internal state.
+     * @param {number} index - Index in denseData array
+     * @returns {boolean} True if removed
+     */
     removeSample(index) {
-        if (index < 0 || index >= this.denseData.length) return;
+        if (index < 0 || index >= this.denseData.length) return false;
 
-        // Remove from unified dataset
-        const removed = this.denseData.splice(index, 1)[0];
+        this.denseData.splice(index, 1);
 
-        // Synchronize internal KNN states (if applicable)
+        // Recompute stats and rebuild KNN from remaining data
+        this.featureStats = this.denseData.length > 0
+            ? computeFeatureStats(this.denseData)
+            : null;
         this._rebuildKnnState();
         return true;
     }
 
+    /**
+     * Lazily ensures KNN state is in sync with denseData.
+     * Called before any KNN prediction. Computes per-feature statistics from
+     * all training data and rebuilds the KNN classifier with consistently-normalized features.
+     */
+    _ensureKnnRebuilt() {
+        if (!this.knnDirty) return;
+        if (this.denseData.length === 0) {
+            this.knnDirty = false;
+            return;
+        }
+
+        // Compute per-feature min/max from all collected samples.
+        this.featureStats = computeFeatureStats(this.denseData);
+
+        // Rebuild entire KNN from denseData using the new stats
+        this._rebuildKnnState();
+        this.knnDirty = false;
+    }
+
     _rebuildKnnState() {
-        // 1. Clear KNN Classifiers - MUST recreate to reset shape memory
+        // 1. Clear and recreate KNN classifier (resets shape memory)
         this.classifier.dispose();
         this.classifier = knn.create();
+
+        // Dispose existing regression tensors before rebuilding
+        Object.values(this.regressionData).forEach(examples => {
+            examples.forEach(ex => { if (ex.tensor) ex.tensor.dispose(); });
+        });
         this.regressionData = {};
         this.classes.clear();
 
         // 2. Re-populate from current denseData
+        // denseData stores raw/type-normalized features (unpadded).
+        // Apply featureStats normalization → [0, 1], then pad 1D for KNN cosine similarity.
         this.denseData.forEach(sample => {
-            // Use tf.tidy to ensure tensors are cleaned up even if exception occurs
             tf.tidy(() => {
-                const tensor = tf.tensor1d(sample.features);
+                let features = sample.features;
+
+                // Normalize using training-data statistics
+                if (this.featureStats) {
+                    features = normalizeWithStats(features, this.featureStats);
+                }
+
+                // Pad 1D features for KNN cosine similarity
+                const needsPad = features.length === 1;
+                const knnFeatures = needsPad ? [...features, 0.5] : features;
+                const tensor = tf.tensor1d(knnFeatures);
 
                 if (sample.type === 'classification' || sample.type === 'dense') {
                     this.classifier.addExample(tensor, sample.label);
@@ -937,10 +1047,11 @@ class MLEngine {
             classification: {},
             regression: {},
             unifiedDataset: this.denseData, // Persist the hub data
+            featureStats: this.featureStats, // Per-feature normalization stats
             metadata: {
                 classNames: classNameMap, // Save class ID -> Name mapping
                 exportedAt: new Date().toISOString(),
-                version: '1.0'
+                version: '1.1'
             }
         };
 
@@ -975,31 +1086,33 @@ class MLEngine {
             // Store imported metadata for UI reconstruction
             this.importedMetadata = data.metadata || {};
 
-            if (data.classification) {
-                const dataset = {};
-                Object.keys(data.classification).forEach(classId => {
-                    const { shape, values } = data.classification[classId];
-                    dataset[classId] = tf.tensor(values, shape);
-                });
-                this.classifier.setClassifierDataset(dataset);
-                Object.keys(dataset).forEach(k => this.classes.add(k));
-            }
-
-            if (data.regression) {
-                Object.entries(data.regression).forEach(([outId, examples]) => {
-                    this.regressionData[outId] = examples.map(ex => ({
-                        tensor: tf.tensor(ex.values, ex.shape),
-                        target: ex.target
-                    }));
-                });
-            }
-
             if (data.unifiedDataset) {
+                // Rebuild from unified dataset.
+                // Do NOT also load data.classification/data.regression — that would
+                // duplicate every KNN example (once from serialized tensors, once from rebuild).
                 this.denseData = data.unifiedDataset;
 
-                // CRITICAL: Rebuild internal KNN structures from unified dataset for prediction
+                // Restore or recompute feature stats for normalization
+                if (data.featureStats) {
+                    this.featureStats = data.featureStats;
+                } else {
+                    // Legacy export without featureStats: recompute from data
+                    this.featureStats = computeFeatureStats(this.denseData);
+                }
+
+                // Rebuild KNN with stats-normalized features (consistent with prediction path)
                 this.denseData.forEach(sample => {
-                    const tensor = tf.tensor1d(sample.features);
+                    let features = sample.features;
+
+                    // Apply training-data statistics normalization
+                    if (this.featureStats) {
+                        features = normalizeWithStats(features, this.featureStats);
+                    }
+
+                    const needsPad = features.length === 1;
+                    const knnFeatures = needsPad ? [...features, 0.5] : features;
+                    const tensor = tf.tensor1d(knnFeatures);
+
                     if (sample.type === 'classification' || sample.type === 'dense') {
                         this.classifier.addExample(tensor, sample.label);
                         this.classes.add(sample.label);
@@ -1015,7 +1128,30 @@ class MLEngine {
                     tensor.dispose();
                 });
             } else {
-                // Backward compatibility: Rebuild denseData from internal structures
+                // Legacy path: no unifiedDataset — load from serialized KNN tensors.
+                if (data.classification) {
+                    const dataset = {};
+                    Object.keys(data.classification).forEach(classId => {
+                        const { shape, values } = data.classification[classId];
+                        dataset[classId] = tf.tensor(values, shape);
+                    });
+                    this.classifier.setClassifierDataset(dataset);
+                    Object.keys(dataset).forEach(k => this.classes.add(k));
+                }
+
+                if (data.regression) {
+                    Object.entries(data.regression).forEach(([outId, examples]) => {
+                        this.regressionData[outId] = examples.map(ex => ({
+                            tensor: tf.tensor(ex.values, ex.shape),
+                            target: ex.target
+                        }));
+                    });
+                }
+
+                // Rebuild denseData from internal KNN structures.
+                // KNN tensors are PADDED (1D→2D with 0.5 appended).
+                // Strip the padding constant before storing in denseData so DNN
+                // training gets correct unpadded features.
                 this.denseData = [];
 
                 // From Classification
@@ -1025,9 +1161,14 @@ class MLEngine {
                     const shape = dataset.shape; // [numExamples, valSize]
                     const valSize = shape[1];
                     for (let i = 0; i < shape[0]; i++) {
-                        const slice = dataArray.slice(i * valSize, (i + 1) * valSize);
+                        let slice = Array.from(dataArray.slice(i * valSize, (i + 1) * valSize));
+                        // Strip 1D padding: if last element is 0.5 and length is 2,
+                        // this was a padded single-feature vector
+                        if (slice.length === 2 && slice[1] === 0.5) {
+                            slice = [slice[0]];
+                        }
                         this.denseData.push({
-                            features: Array.from(slice),
+                            features: slice,
                             label: label,
                             type: 'classification',
                             timestamp: Date.now()
@@ -1038,8 +1179,13 @@ class MLEngine {
                 // From Regression
                 Object.entries(this.regressionData).forEach(([label, examples]) => {
                     examples.forEach(ex => {
+                        let features = Array.from(ex.tensor.dataSync());
+                        // Strip 1D padding
+                        if (features.length === 2 && features[1] === 0.5) {
+                            features = [features[0]];
+                        }
                         this.denseData.push({
-                            features: Array.from(ex.tensor.dataSync()),
+                            features: features,
                             label: label,
                             target: ex.target,
                             type: 'regression',
@@ -1099,7 +1245,7 @@ class MLEngine {
                 zip.file("model/weights.bin", artifacts.weightData);
             }
 
-            // 3. Add metadata (Hybrid: Compatible with BOTH ml5.js and Teachable Machine)
+            // 3. Add metadata (ml5.js + Teachable Machine compatible)
             const classesAList = Array.from(this.classes).sort();
             // Use mapped names for classes in metadata.json
             const labels = classesAList.map(id => classNameMap[id] || id);
@@ -1127,7 +1273,7 @@ class MLEngine {
             };
             zip.file('model/metadata.json', JSON.stringify(metadata, null, 2));
 
-            // 4. Bundle MobileNet (Vision Model) to ensure 100% Parity
+            // 4. Bundle MobileNet for standalone deployment
             // Fetch MobileNet files from public folder for bundling
             try {
                 const mobilenetFiles = [

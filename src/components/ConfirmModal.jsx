@@ -1,8 +1,14 @@
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
 
-export function ConfirmModal({ isOpen, title, message, onConfirm, onCancel }) {
+export function ConfirmModal({ isOpen, title, message, onConfirm, onCancel, confirmLabel = 'Continue', confirmColor = 'emerald' }) {
     if (!isOpen) return null;
+
+    const colorMap = {
+        emerald: 'bg-emerald-500 hover:bg-emerald-400',
+        amber: 'bg-amber-500 hover:bg-amber-400',
+        red: 'bg-red-500 hover:bg-red-400',
+    };
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
@@ -15,14 +21,13 @@ export function ConfirmModal({ isOpen, title, message, onConfirm, onCancel }) {
                     <h2 className="text-lg font-bold text-white">{title}</h2>
                 </div>
 
-                {/* Content */}
+                {/* Content — accepts JSX or plain string */}
                 <div className="px-6 pb-6">
-                    <p className="text-sm text-zinc-400 leading-relaxed">
-                        Switching input source will clear all training data and models.
-                    </p>
-                    <p className="text-sm text-zinc-500 mt-3">
-                        Any unsaved work will be lost.
-                    </p>
+                    {typeof message === 'string' ? (
+                        <p className="text-sm text-zinc-400 leading-relaxed whitespace-pre-line">{message}</p>
+                    ) : (
+                        message
+                    )}
                 </div>
 
                 {/* Actions */}
@@ -35,9 +40,9 @@ export function ConfirmModal({ isOpen, title, message, onConfirm, onCancel }) {
                     </button>
                     <button
                         onClick={onConfirm}
-                        className="flex-1 px-4 py-2.5 rounded bg-emerald-500 text-black hover:bg-emerald-400 text-sm font-bold uppercase tracking-wider transition-all"
+                        className={`flex-1 px-4 py-2.5 rounded text-black text-sm font-bold uppercase tracking-wider transition-all ${colorMap[confirmColor] || colorMap.emerald}`}
                     >
-                        Continue
+                        {confirmLabel}
                     </button>
                 </div>
             </div>

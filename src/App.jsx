@@ -12,7 +12,6 @@ import { validateClassName, sanitizeInput } from './utils';
 import { Sidebar } from './components/Sidebar';
 import { InputCard } from './components/InputCard';
 import { TrainingCard } from './components/TrainingCard';
-// DataCard import removed (unused)
 import { HubView } from './components/HubView';
 
 import { SettingsModal } from './components/SettingsModal';
@@ -27,6 +26,8 @@ function App() {
     const [inputSource, setInputSource] = useState('webcam'); // 'serial' | 'webcam' | 'osc'
     const [showSourceChangeModal, setShowSourceChangeModal] = useState(false);
     const [pendingSource, setPendingSource] = useState(null);
+    // Generic confirmation modal (for mode/engine switches, destructive actions)
+    const [confirmModal, setConfirmModal] = useState({ open: false, title: '', message: '', onConfirm: null, confirmLabel: 'Continue', confirmColor: 'emerald' });
     const [connectionStatus, setConnectionStatus] = useState({ connected: false, source: 'None' });
 
     const [incomingData, setIncomingData] = useState({});
@@ -40,9 +41,9 @@ function App() {
         threshold: 0.167,
         gestureMode: false, // When true, applies IMU normalization for gesture recognition
         gesturePredictionMode: false, // When true, only predict on gesture completion (not every frame)
-        confidenceThreshold: 0.65, // Minimum confidence to show prediction (65% - TMT uses 60%)
-        smoothingWindow: 7, // Number of predictions for majority voting (TMT uses 5-10)
-        predictionCooldown: 200 // Minimum ms between prediction changes (TMT uses 125-200ms)
+        confidenceThreshold: 0.65,
+        smoothingWindow: 7,
+        predictionCooldown: 200
     });
 
     // Data Management
@@ -76,6 +77,7 @@ function App() {
     const lastDataRef = useRef({});
     const lastDataTimeRef = useRef(0); // Track timestamp of last received data
     const inputSourceRef = useRef(inputSource);
+    const classesRef = useRef(classes);
 
     // UI throttling: Only update display at 30fps, but keep refs real-time for predictions
     const lastUIUpdateRef = useRef(0);
@@ -105,6 +107,10 @@ function App() {
     const [hasSignal, setHasSignal] = useState(false);
 
     // Sync refs
+    useEffect(() => {
+        classesRef.current = classes;
+    }, [classes]);
+
     useEffect(() => {
         protocolRef.current = protocol;
         targetDeviceIdRef.current = targetDeviceId;
@@ -150,7 +156,7 @@ function App() {
         }
     }, [detectedMessageTypes.size, messageTypeFilter]);
 
-    // PERFORMANCE: Initialize TensorFlow.js with WebGL backend for faster inference
+    // Initialize TensorFlow.js with WebGL backend
     useEffect(() => {
         // Log browser compatibility warnings
         logCompatibilityWarnings();
@@ -348,7 +354,6 @@ function App() {
     useEffect(() => {
         if (isRunning && trainingConfig.autoCapture) {
             setTrainingConfig(prev => ({ ...prev, autoCapture: false }));
-            setTrainingConfig(prev => ({ ...prev, autoCapture: false }));
         }
     }, [isRunning]);
 
@@ -411,14 +416,14 @@ function App() {
                             setPrediction(result);
                             // Broadcast classification via OSC
                             if (window.api && window.api.osc && result.label) {
-                                const clsName = classes.find(c => c.id === result.label)?.name || result.label;
+                                const clsName = classesRef.current.find(c => c.id === result.label)?.name || result.label;
                                 window.api.osc.send('127.0.0.1', 12000, '/ml/classification', [result.label, clsName]);
                             }
                             // Broadcast via WebSocket
                             if (window.api && window.api.ws) {
                                 window.api.ws.broadcast('prediction', {
                                     ...result,
-                                    labelName: classes.find(c => c.id === result.label)?.name || result.label,
+                                    labelName: classesRef.current.find(c => c.id === result.label)?.name || result.label,
                                     protocol: protocolRef.current,
                                     deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
                                     serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
@@ -435,16 +440,12 @@ function App() {
                 autoCaptureCooldownRef.current = 40; // ~0.8s cooldown
             }
         } else {
-            // Detection phase - TMT Formula: sum(abs(all_6_axes)) / 6
-            const sumAbs =
-                (Math.abs(data.ch_0 || 0) +
-                    Math.abs(data.ch_1 || 0) +
-                    Math.abs(data.ch_2 || 0) +
-                    Math.abs(data.ch_3 || 0) +
-                    Math.abs(data.ch_4 || 0) +
-                    Math.abs(data.ch_5 || 0));
+            // Detection phase: average absolute signal across selected features
+            const activeFeatures = Array.from(selectedFeaturesRef.current);
+            if (activeFeatures.length === 0) return;
 
-            const signalStrength = sumAbs / 6.0;
+            const sumAbs = activeFeatures.reduce((sum, key) => sum + Math.abs(data[key] || 0), 0);
+            const signalStrength = sumAbs / activeFeatures.length;
 
             if (signalStrength > trainingConfigRef.current.threshold) {
                 setIsCapturingAuto(true);
@@ -478,7 +479,7 @@ function App() {
                 return;
             }
 
-            // ALWAYS update refs immediately (real-time for predictions/training)
+            // Update refs immediately (real-time for predictions/training)
             lastDataRef.current = data;
             lastDataTimeRef.current = Date.now();
 
@@ -570,13 +571,13 @@ function App() {
                     if (result) {
                         setPrediction(result);
                         if (window.api && window.api.osc && result.label) {
-                            const clsName = classes.find(c => c.id === result.label)?.name || result.label;
+                            const clsName = classesRef.current.find(c => c.id === result.label)?.name || result.label;
                             window.api.osc.send('127.0.0.1', 12000, '/ml/classification', [result.label, clsName]);
                         }
                         if (window.api && window.api.ws) {
                             window.api.ws.broadcast('prediction', {
                                 ...result,
-                                labelName: classes.find(c => c.id === result.label)?.name || result.label,
+                                labelName: classesRef.current.find(c => c.id === result.label)?.name || result.label,
                                 protocol: protocolRef.current,
                                 deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
                                 serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
@@ -585,33 +586,36 @@ function App() {
                     }
                 } else {
                     // KNN Prediction
-                    const numClasses = mlEngine.classifier.getNumClasses();
-                    if (numClasses > 0) {
-                        const result = await mlEngine.predictClassification(data, features);
-                        if (result) {
-                            setPrediction(result);
+                    // Don't pre-check getNumClasses() here — the classifier may be
+                    // lazily rebuilt inside predictClassification. Let the method handle it.
+                    const result = await mlEngine.predictClassification(data, features);
+                    if (result) {
+                        setPrediction(result);
 
-                            // Broadcast Classification (OSC)
-                            if (window.api && window.api.osc && result.label) {
-                                const clsName = classes.find(c => c.id === result.label)?.name || result.label;
-                                window.api.osc.send('127.0.0.1', 12000, '/ml/classification', [result.label, clsName]);
-                            }
-                            if (window.api && window.api.ws) {
-                                window.api.ws.broadcast('prediction', {
-                                    ...result,
-                                    labelName: classes.find(c => c.id === result.label)?.name || result.label,
-                                    protocol: protocolRef.current,
-                                    deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
-                                    serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
-                                });
-                            }
+                        // Broadcast Classification (OSC)
+                        if (window.api && window.api.osc && result.label) {
+                            const clsName = classesRef.current.find(c => c.id === result.label)?.name || result.label;
+                            window.api.osc.send('127.0.0.1', 12000, '/ml/classification', [result.label, clsName]);
+                        }
+                        if (window.api && window.api.ws) {
+                            window.api.ws.broadcast('prediction', {
+                                ...result,
+                                labelName: classesRef.current.find(c => c.id === result.label)?.name || result.label,
+                                protocol: protocolRef.current,
+                                deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
+                                serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
+                            });
                         }
                     }
                 }
             } else {
                 // Regression Prediction
                 try {
-                    const result = await mlEngine.predictRegression(data, features);
+                    // Use DNN prediction if model is trained and engine is dense, else KNN
+                    const useDNN = engineTypeRef.current === 'dense' && mlEngine.denseModel && mlEngine.denseModelType === 'regression';
+                    const result = useDNN
+                        ? await mlEngine.predictDense(data, features)
+                        : await mlEngine.predictRegression(data, features);
 
                     if (result) {
                         setPrediction(result);
@@ -626,7 +630,7 @@ function App() {
                         if (window.api && window.api.ws) {
                             window.api.ws.broadcast('prediction', {
                                 ...result,
-                                labelName: classes.find(c => c.id === result.label)?.name || result.label,
+                                labelName: 'regression',
                                 protocol: protocolRef.current,
                                 deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
                                 serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
@@ -673,8 +677,6 @@ function App() {
         // Exception: 'upload' source is static, never stale
         if (inputSource !== 'upload' && isStale) {
             console.warn('[App] trainFrame ignored: Data is stale (No signal)');
-            // Optionally trigger a UI warning here via setLastError?
-            // setLastError("No Signal: Cannot Train"); 
             return;
         }
 
@@ -778,9 +780,8 @@ function App() {
     // Dynamic Class Management
     const addClass = () => {
         if (lastError) setLastError(null);
-        const nextId = classes.length + 1;
         const newClass = {
-            id: `class_${classes.length + 1}`, // Simple unique ID
+            id: `class_${Date.now()}`,
             name: `Class ${classes.length + 1}`,
             count: 0
         };
@@ -827,10 +828,105 @@ function App() {
 
     const removeOutput = (id) => {
         setOutputs(prev => prev.filter(o => o.id !== id));
+
+        // Remove all regression data for this output from MLEngine
+        mlEngine.clearClassData(id);
     };
 
     const updateOutputTarget = (id, val) => {
         setOutputs(prev => prev.map(o => o.id === id ? { ...o, value: val } : o));
+    };
+
+    // --- Guarded Mode & Engine Switching ---
+    // Switching classification<->regression is destructive: class data isn't meaningful
+    // as regression data and vice versa. Warn and clear if data exists.
+    const handleSetTrainingMode = (newMode) => {
+        if (newMode === trainingMode) return;
+
+        const hasData = classes.some(c => c.count > 0) || outputs.some(o => (o.samples || 0) > 0);
+        const hasModel = trainingProgress !== null || mlEngine.denseModel !== null;
+
+        if (hasData || hasModel) {
+            const modeLabel = newMode === 'classification' ? 'Classification' : 'Regression';
+            setConfirmModal({
+                open: true,
+                title: 'Switch Mode?',
+                message: (
+                    <>
+                        <p className="text-sm text-zinc-400 leading-relaxed">
+                            Switching to <span className="text-white font-medium">{modeLabel}</span> mode will <span className="text-amber-500 font-semibold">clear all training data</span> and models.
+                        </p>
+                        <p className="text-sm text-zinc-500 mt-3">
+                            Any unsaved work will be lost.
+                        </p>
+                    </>
+                ),
+                confirmLabel: 'Switch Mode',
+                confirmColor: 'amber',
+                onConfirm: () => {
+                    setConfirmModal({ open: false, title: '', message: '', onConfirm: null });
+                    setTrainingMode(newMode);
+                    clearModel();
+                }
+            });
+            return;
+        }
+        setTrainingMode(newMode);
+    };
+
+    // Switching KNN<->Dense while running or with a trained DNN model needs care.
+    const handleSetEngineType = (newEngine) => {
+        if (newEngine === engineType) return;
+
+        const hasTrainedDNN = mlEngine.denseModel !== null;
+
+        if (hasTrainedDNN || isRunning) {
+            setConfirmModal({
+                open: true,
+                title: 'Switch Engine?',
+                message: newEngine === 'knn' ? (
+                    <>
+                        <p className="text-sm text-zinc-400 leading-relaxed">
+                            Switching to KNN will <span className="text-amber-500 font-semibold">discard your trained neural network</span>.
+                        </p>
+                        <p className="text-sm text-zinc-500 mt-3">
+                            Your recorded data will be kept for KNN prediction.
+                        </p>
+                    </>
+                ) : (
+                    <>
+                        <p className="text-sm text-zinc-400 leading-relaxed">
+                            Switching to <span className="text-white font-medium">Dense Neural Network</span>.
+                        </p>
+                        <p className="text-sm text-zinc-500 mt-3">
+                            You will need to <span className="text-white font-medium">train the model</span> before running inference.
+                        </p>
+                    </>
+                ),
+                confirmLabel: 'Switch Engine',
+                confirmColor: 'amber',
+                onConfirm: () => {
+                    setConfirmModal({ open: false, title: '', message: '', onConfirm: null });
+                    // Stop running when switching engines
+                    if (isRunning) setIsRunning(false);
+                    // Dispose the DNN model (data is kept in denseData)
+                    if (mlEngine.denseModel) {
+                        mlEngine.denseModel.dispose();
+                        mlEngine.denseModel = null;
+                    }
+                    mlEngine.denseModelType = null;
+                    setTrainingProgress(null);
+                    setPrediction(null);
+                    setEngineType(newEngine);
+                    // For KNN: mark dirty so data gets properly rebuilt on next predict
+                    if (newEngine === 'knn') {
+                        mlEngine.knnDirty = true;
+                    }
+                }
+            });
+            return;
+        }
+        setEngineType(newEngine);
     };
 
     // --- Image Upload Handler ---
@@ -924,10 +1020,13 @@ function App() {
                 }
             } else {
                 let res;
+                const featureKeys = selectedFeatures.size > 0
+                    ? Array.from(selectedFeatures)
+                    : Object.keys(features);
                 if (trainingMode === 'classification') {
-                    res = await mlEngine.predictClassification(features);
+                    res = await mlEngine.predictClassification(features, featureKeys);
                 } else {
-                    res = await mlEngine.predictRegression(features);
+                    res = await mlEngine.predictRegression(features, featureKeys);
                 }
                 // Add labelName for Consistent Output
                 if (res) {
@@ -969,6 +1068,11 @@ function App() {
     const handleTrainModel = async () => {
         if (engineType !== 'dense') return;
 
+        // Stop inference during training to prevent garbage predictions
+        // from a partially-trained model (weights change every epoch)
+        const wasRunning = isRunning;
+        if (isRunning) setIsRunning(false);
+
         setIsTraining(true);
         setLastError(null); // Clear any previous errors
         // Don't set trainingProgress yet - wait for first epoch
@@ -1008,11 +1112,12 @@ function App() {
             setTrainingProgress(null); // Clear progress on error
         } finally {
             setIsTraining(false);
+            // Re-enable inference if it was running before training
+            if (wasRunning) setIsRunning(true);
             // Keep trainingProgress if training succeeded to show "RETRAIN"
         }
     };
 
-    // --- Data Import/Export Handlers ---
     // --- Data Import/Export Handlers ---
     const handleSaveData = async () => {
         try {
@@ -1115,6 +1220,15 @@ function App() {
 
                                     setOutputs(newOutputs.filter(o => o.samples > 0));
 
+                                    // Auto-detect training mode from imported data
+                                    const hasClassData = Object.keys(classCounts).length > 0;
+                                    const hasRegData = Object.keys(regCounts).length > 0;
+                                    if (hasRegData && !hasClassData) {
+                                        setTrainingMode('regression');
+                                    } else {
+                                        setTrainingMode('classification');
+                                    }
+
                                     setPrediction(null);
                                     setTrainingProgress(null);
                                     setIsRunning(false);
@@ -1169,9 +1283,9 @@ function App() {
                     isRunning={isRunning}
                     setIsRunning={setIsRunning}
                     trainingMode={trainingMode}
-                    setTrainingMode={setTrainingMode}
+                    setTrainingMode={handleSetTrainingMode}
                     engineType={engineType}
-                    setEngineType={setEngineType}
+                    setEngineType={handleSetEngineType}
                     trainFrame={trainFrame}
                     onRemoveClass={removeClass}
                     onRenameClass={renameClass}
@@ -1211,6 +1325,8 @@ function App() {
                     setMessageTypeFilter={setMessageTypeFilter}
                     detectedMessageTypes={detectedMessageTypes}
                     mlEngine={mlEngine} // Pass singleton to avoid import issues in children
+                    connectionStatus={connectionStatus}
+                    lastError={lastError}
                 />
             </ErrorBoundary>
 
@@ -1218,9 +1334,31 @@ function App() {
             <ConfirmModal
                 isOpen={showSourceChangeModal}
                 title="Switch Input Source?"
-                message="Switching input source will clear all training data and models.\n\nAny unsaved work will be lost. Continue?"
+                message={
+                    <>
+                        <p className="text-sm text-zinc-400 leading-relaxed">
+                            Switching input source will <span className="text-amber-500 font-semibold">clear all training data</span> and models.
+                        </p>
+                        <p className="text-sm text-zinc-500 mt-3">
+                            Any unsaved work will be lost.
+                        </p>
+                    </>
+                }
+                confirmLabel="Switch"
+                confirmColor="amber"
                 onConfirm={handleConfirmSourceChange}
                 onCancel={handleCancelSourceChange}
+            />
+
+            {/* Generic Confirmation Modal (mode/engine switch, destructive actions) */}
+            <ConfirmModal
+                isOpen={confirmModal.open}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                confirmLabel={confirmModal.confirmLabel}
+                confirmColor={confirmModal.confirmColor}
+                onConfirm={confirmModal.onConfirm}
+                onCancel={() => setConfirmModal({ open: false, title: '', message: '', onConfirm: null })}
             />
         </div>
     );

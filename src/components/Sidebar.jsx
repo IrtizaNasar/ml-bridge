@@ -1,12 +1,11 @@
 import React from 'react';
-import { LayoutGrid, Target, Database, Settings, Zap, Activity, LayoutTemplate } from 'lucide-react';
+import { LayoutGrid, Target, Database, Settings, Zap, Activity } from 'lucide-react';
 
 export function Sidebar({ activeTab, setActiveTab, isProMode, setIsProMode, onOpenSettings }) {
     const tabs = [
         { id: 'hub', label: 'HUB', icon: LayoutGrid },
         { id: 'train', label: 'TRAINING', icon: Target },
         { id: 'data', label: 'DATASET', icon: Database },
-        { id: 'ui-lab', label: 'UI LAB', icon: LayoutTemplate },
     ];
 
     return (

@@ -7,12 +7,12 @@ import {
     Cpu, Layers, Search, Keyboard,
     Save, FolderOpen, RotateCcw,
     Wifi, Video, Monitor,
-    Database, Send, History, Image, Lock // Imported new icons
+    Database, Send, History, Image, Lock
 } from 'lucide-react';
-import { Visualizer } from './Visualizer'; // Import reusable Visualizer
+import { Visualizer } from './Visualizer';
 import { WebcamPreview } from './WebcamPreview';
-import { DataView } from './DataView'; // Import new Data Tab View
-import { ConfirmModal } from './ConfirmModal'; // Import ConfirmModal for feature lock warning
+import { DataView } from './DataView';
+import { ConfirmModal } from './ConfirmModal';
 
 import { DeployView } from './DeployView'; // Import Deploy/Monitor View
 
@@ -263,7 +263,7 @@ function ClassCard({ cls, prediction, onTrain, onRemove, onRename, engineType, o
 
 function RegressionCard({ output, prediction, onTrain, onRemove, onUpdateTarget, onUpload, inputSource, hasSignal }) {
     const [isRecording, setIsRecording] = useState(false);
-    const [isDragOver, setIsDragOver] = useState(false); // New: Drag & Drop State
+    const [isDragOver, setIsDragOver] = useState(false);
     const predictedValue = prediction?.regression?.[output.id];
     const hasPrediction = predictedValue !== undefined && predictedValue !== null;
     const isUploadMode = inputSource === 'upload';
@@ -471,14 +471,14 @@ export function ConceptDashboard({
     messageTypeFilter, setMessageTypeFilter, // New: Message type filter for multi-stream devices
     detectedMessageTypes, // Auto-detected message types
     mlEngine, // Receive singleton
-    hasSignal // Received from App
+    hasSignal, // Received from App
+    lastError // Training/prediction error message
 }) {
     // Internal dashboard state (View switching)
-    const [activeView, setActiveView] = useState('training'); // 'data' | 'training' | 'models' | 'deploy'
-    const [showAdvancedTraining, setShowAdvancedTraining] = useState(false); // New: Collapse advanced settings
-    const [showEmbeddings, setShowEmbeddings] = useState(false); // Collapsible embeddings section
-    // outputProtocol removed - now managed in App.jsx and passed as props
-    
+    const [activeView, setActiveView] = useState('training');
+    const [showAdvancedTraining, setShowAdvancedTraining] = useState(false);
+    const [showEmbeddings, setShowEmbeddings] = useState(false);
+
     // Feature lock warning modal state
     const [featureLockModal, setFeatureLockModal] = useState({ open: false, featureKey: null });
 
@@ -490,12 +490,11 @@ export function ConceptDashboard({
     // Handler to confirm clearing data and unlocking features
     const handleClearAndUnlock = () => {
         clearModel();
-        // After clearing, toggle the feature that was clicked (if desired)
-        // For now, just close the modal - user can now freely select features
+        // Close the modal so user can freely adjust features
         setFeatureLockModal({ open: false, featureKey: null });
     };
 
-    // Auto-switch to monitor when running - NOW switch to DEPLOY tab (Monitor moved there)
+    // Auto-switch to Deploy tab when inference starts
     useEffect(() => {
         if (isRunning) setActiveView('deploy');
     }, [isRunning]);
@@ -887,6 +886,7 @@ export function ConceptDashboard({
 
                 {/* RIGHT SIDEBAR: CONTROLS */}
                 <aside className="w-72 border-l border-[#222] bg-[#080808] flex flex-col z-20">
+                  <div className="flex-1 overflow-y-auto custom-scrollbar">
                     {/* Training Config */}
                     <div className="p-4 border-b border-[#222]">
                         <div className="flex justify-between items-center mb-4">
@@ -1129,13 +1129,13 @@ export function ConceptDashboard({
                                     <div className="flex items-start gap-2 p-2 bg-blue-500/10 border border-blue-500/20 rounded">
                                         <div className="w-2 h-2 bg-blue-400 rounded-full mt-1 animate-pulse flex-shrink-0" />
                                         <p className="text-[9px] text-blue-300 leading-relaxed">
-                                            <strong>Tiny Trainer Mode:</strong> Predictions only occur when auto-capture completes a full gesture.
+                                            <strong>Gesture Mode:</strong> Predictions only occur when auto-capture completes a full gesture.
                                             No continuous frame-by-frame prediction. Reduces flickering.
                                         </p>
                                     </div>
                                 ) : (
                                     <p className="text-[9px] text-zinc-600 leading-relaxed">
-                                        Continuous prediction on every frame. Enable for gesture-triggered prediction (matches Tiny Motion Trainer).
+                                        Continuous prediction on every frame. Enable for gesture-triggered prediction.
                                     </p>
                                 )}
                             </div>
@@ -1175,6 +1175,11 @@ export function ConceptDashboard({
                                     {trainingProgress && (
                                         <div className="text-[10px] font-mono text-emerald-400 text-center">
                                             Loss: {trainingProgress.loss.toFixed(4)} • {trainingMode === 'regression' ? `MSE: ${(trainingProgress.accuracy || 0).toFixed(4)}` : `Acc: ${((trainingProgress.accuracy || 0) * 100).toFixed(0)}%`}
+                                        </div>
+                                    )}
+                                    {lastError && (
+                                        <div className="mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded text-[10px] text-red-400 font-mono leading-relaxed">
+                                            {lastError}
                                         </div>
                                     )}
                                 </div>
@@ -1273,12 +1278,24 @@ export function ConceptDashboard({
                             </div>
                         </div>
                     </div>
+                  </div>
 
                     {/* Footer Stats */}
-                    <div className="mt-auto p-4 border-t border-[#222] bg-[#050505]">
+                    <div className="p-4 border-t border-[#222] bg-[#050505]">
                         <div className="grid grid-cols-2 gap-4">
-                            <StatMetric label="LATENCY" value="12" unit="ms" active={true} />
-                            <StatMetric label="ACCURACY" value={getAccuracyValue(prediction)} unit="%" active={!!prediction} />
+                            <StatMetric label="SAMPLES" value={mlEngine?.denseData?.length || 0} unit="" active={true} />
+                            <StatMetric
+                                label={engineType === 'dense' ? 'TRAIN ACC' : 'CONFIDENCE'}
+                                value={
+                                    engineType === 'dense' && trainingProgress
+                                        ? (trainingMode === 'regression'
+                                            ? trainingProgress.loss.toFixed(4)
+                                            : ((trainingProgress.accuracy || 0) * 100).toFixed(1))
+                                        : getAccuracyValue(prediction)
+                                }
+                                unit={engineType === 'dense' && trainingProgress && trainingMode === 'regression' ? 'mse' : '%'}
+                                active={engineType === 'dense' ? !!trainingProgress : !!prediction}
+                            />
                         </div>
                     </div>
                 </aside>
