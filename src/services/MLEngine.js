@@ -509,10 +509,20 @@ class MLEngine {
         const tensor = this._toTensor(inputData, features, dataType, false, this.featureStats);
         if (!tensor) return null;
 
-        // Shape [1, N]
-        const input = tensor.expandDims(0);
-        const prediction = this.denseModel.predict(input);
-        const data = await prediction.data();
+        let input, prediction, data;
+        try {
+            // Shape [1, N]
+            input = tensor.expandDims(0);
+            prediction = this.denseModel.predict(input);
+            data = await prediction.data();
+        } catch (e) {
+            // Guard against model disposal during prediction
+            tensor.dispose();
+            if (input) input.dispose();
+            if (prediction) prediction.dispose();
+            console.warn('Dense prediction error:', e);
+            return null;
+        }
 
         tensor.dispose();
         input.dispose();
@@ -1031,8 +1041,8 @@ class MLEngine {
                     if (!this.regressionData[sample.label]) {
                         this.regressionData[sample.label] = [];
                     }
-                    // Clone tensor outside of tidy since we need to keep it
-                    const clonedTensor = tensor.clone();
+                    // tf.keep() prevents tf.tidy from disposing this tensor
+                    const clonedTensor = tf.keep(tensor.clone());
                     this.regressionData[sample.label].push({
                         tensor: clonedTensor,
                         target: sample.target

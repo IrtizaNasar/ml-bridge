@@ -11,7 +11,6 @@ import { validateClassName, sanitizeInput } from './utils';
 // Components
 import { Sidebar } from './components/Sidebar';
 import { InputCard } from './components/InputCard';
-import { TrainingCard } from './components/TrainingCard';
 import { HubView } from './components/HubView';
 
 import { SettingsModal } from './components/SettingsModal';
@@ -558,6 +557,7 @@ function App() {
             const currentMode = trainingModeRef.current;
 
             if (currentMode === 'classification') {
+                try {
                 if (engineTypeRef.current === 'dense') {
                     // Dense Model Prediction
                     // Use gesture mode from training config, or auto-detect
@@ -570,6 +570,7 @@ function App() {
                     const result = await mlEngine.predictDense(data, features, dataType);
                     if (result) {
                         setPrediction(result);
+                        setLastError(null);
                         if (window.api && window.api.osc && result.label) {
                             const clsName = classesRef.current.find(c => c.id === result.label)?.name || result.label;
                             window.api.osc.send('127.0.0.1', 12000, '/ml/classification', [result.label, clsName]);
@@ -583,6 +584,8 @@ function App() {
                                 serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
                             });
                         }
+                    } else if (mlEngine.lastError) {
+                        setLastError(mlEngine.lastError);
                     }
                 } else {
                     // KNN Prediction
@@ -591,6 +594,7 @@ function App() {
                     const result = await mlEngine.predictClassification(data, features);
                     if (result) {
                         setPrediction(result);
+                        setLastError(null);
 
                         // Broadcast Classification (OSC)
                         if (window.api && window.api.osc && result.label) {
@@ -607,6 +611,9 @@ function App() {
                             });
                         }
                     }
+                }
+                } catch (err) {
+                    console.error("Classification prediction error:", err);
                 }
             } else {
                 // Regression Prediction

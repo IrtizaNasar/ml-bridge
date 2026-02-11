@@ -122,6 +122,13 @@ function ClassCard({ cls, prediction, onTrain, onRemove, onRename, engineType, o
         onTrainRef.current = onTrain;
     }, [onTrain]);
 
+    // Cleanup interval on unmount to prevent zombie recording
+    useEffect(() => {
+        return () => {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+        };
+    }, []);
+
     const startRecording = () => {
         setIsRecording(true);
 
@@ -279,6 +286,13 @@ function RegressionCard({ output, prediction, onTrain, onRemove, onUpdateTarget,
         onTrainRef.current = onTrain;
         outputRef.current = output;
     }, [onTrain, output]);
+
+    // Cleanup interval on unmount to prevent zombie recording
+    useEffect(() => {
+        return () => {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+        };
+    }, []);
 
     const startRecording = () => {
         setIsRecording(true);
