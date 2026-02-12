@@ -1,6 +1,6 @@
 /*
   ML Bridge - USB Serial Regression Example
-  Controls LED brightness based on "out_1" regression value (0.0 - 1.0)
+  Controls LED brightness based on "Parameter 1" regression value (0.0 - 1.0)
 
   Wiring:
   - LED positive (long leg) -> Pin 3 (Must be a PWM pin like 3, 5, 6, 9, 10, 11
@@ -36,20 +36,23 @@ void processData(String data) {
   float value = 0.0;
   bool found = false;
 
-  // 1. Try Parsing JSON: {"out_1":0.75, "out_2":0.1}
+  // 1. Try Parsing JSON: {"Parameter 1":0.75, "Parameter 2":0.1}
   if (data.indexOf("{") >= 0) {
-    // Basic string parsing for "out_1":NUMBER
-    int keyIndex = data.indexOf("\"out_1\":");
+    // Basic string parsing for "Parameter 1":NUMBER
+    int keyIndex = data.indexOf("Parameter 1");
     if (keyIndex >= 0) {
-      int valStart = keyIndex + 8; // length of "out_1":
-      int valEnd = data.indexOf(",", valStart);
-      if (valEnd == -1)
-        valEnd = data.indexOf("}", valStart);
+      int colonIndex = data.indexOf(":", keyIndex);
+      if (colonIndex >= 0) {
+        int valStart = colonIndex + 1;
+        int valEnd = data.indexOf(",", valStart);
+        if (valEnd == -1)
+          valEnd = data.indexOf("}", valStart);
 
-      if (valEnd > valStart) {
-        String valStr = data.substring(valStart, valEnd);
-        value = valStr.toFloat();
-        found = true;
+        if (valEnd > valStart) {
+          String valStr = data.substring(valStart, valEnd);
+          value = valStr.toFloat();
+          found = true;
+        }
       }
     }
   }

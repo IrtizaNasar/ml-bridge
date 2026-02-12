@@ -3,8 +3,8 @@
  * 
  * Receives classification predictions from Serial Bridge via Bluetooth
  * Controls LED on pin 2:
- *   - class_1 → LED ON
- *   - class_2 → LED OFF
+ *   - Class 1 → LED ON
+ *   - Class 2 → LED OFF
  * 
  * Supports both JSON and CSV formats from Serial Bridge
  */
@@ -103,7 +103,7 @@ void processData(String &data) {
   
   // Try to parse as JSON first
   if (data.startsWith("{")) {
-    // JSON format: {"label":"class_1","confidence":0.85}
+    // JSON format: {"label":"Class 1","confidence":0.85}
     int labelStart = data.indexOf("\"label\":\"") + 9;
     int labelEnd = data.indexOf("\"", labelStart);
     if (labelStart > 8 && labelEnd > labelStart) {
@@ -112,7 +112,7 @@ void processData(String &data) {
   } 
   // Try CSV format
   else if (data.indexOf(",") > 0) {
-    // CSV format: class_1,0.85
+    // CSV format: Class 1,0.85
     int commaIndex = data.indexOf(",");
     label = data.substring(0, commaIndex);
   }
@@ -121,14 +121,14 @@ void processData(String &data) {
     label = data;
   }
   
-  // Control LED based on class
-  if (label.indexOf("class_1") >= 0 || label == "1") {
+  // Control LED based on class name
+  if (label == "Class 1") {
     digitalWrite(LED_PIN, HIGH);
-    Serial.println("→ LED ON (class_1)");
+    Serial.println("→ LED ON (Class 1)");
   } 
-  else if (label.indexOf("class_2") >= 0 || label == "2") {
+  else if (label == "Class 2") {
     digitalWrite(LED_PIN, LOW);
-    Serial.println("→ LED OFF (class_2)");
+    Serial.println("→ LED OFF (Class 2)");
   }
   else {
     Serial.print("→ Unknown class: ");

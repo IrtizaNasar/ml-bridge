@@ -77,6 +77,7 @@ function App() {
     const lastDataTimeRef = useRef(0); // Track timestamp of last received data
     const inputSourceRef = useRef(inputSource);
     const classesRef = useRef(classes);
+    const outputsRef = useRef(outputs);
 
     // UI throttling: Only update display at 30fps, but keep refs real-time for predictions
     const lastUIUpdateRef = useRef(0);
@@ -109,6 +110,10 @@ function App() {
     useEffect(() => {
         classesRef.current = classes;
     }, [classes]);
+
+    useEffect(() => {
+        outputsRef.current = outputs;
+    }, [outputs]);
 
     useEffect(() => {
         protocolRef.current = protocol;
@@ -147,6 +152,41 @@ function App() {
     useEffect(() => {
         serialFormatRef.current = serialFormat;
     }, [serialFormat]);
+
+    // --- Broadcast Helpers ---
+    // Maps internal IDs to human-readable names for external output (WebSocket, OSC, Serial Bridge)
+    const buildClassificationBroadcast = (result, classesList) => {
+        const clsName = classesList.find(c => c.id === result.label)?.name || result.label;
+        // Remap confidences keys from internal IDs to human names
+        const namedConfidences = {};
+        if (result.confidences) {
+            Object.entries(result.confidences).forEach(([id, conf]) => {
+                const name = classesList.find(c => c.id === id)?.name || id;
+                namedConfidences[name] = conf;
+            });
+        }
+        return {
+            classId: result.label,
+            label: clsName,
+            labelName: clsName,
+            confidence: result.confidence,
+            confidences: namedConfidences
+        };
+    };
+
+    const buildRegressionBroadcast = (result, outputsList) => {
+        // Remap regression keys from internal IDs to human names
+        const namedRegression = {};
+        if (result.regression) {
+            Object.entries(result.regression).forEach(([id, val]) => {
+                const name = outputsList.find(o => o.id === id)?.name || id;
+                namedRegression[name] = val;
+            });
+        }
+        return {
+            regression: namedRegression
+        };
+    };
 
     // Auto-reset filter when it becomes hidden (< 2 types)
     useEffect(() => {
@@ -413,16 +453,15 @@ function App() {
                     mlEngine.predictDenseGesture(samples, features, dataType).then(result => {
                         if (result) {
                             setPrediction(result);
+                            const mapped = buildClassificationBroadcast(result, classesRef.current);
                             // Broadcast classification via OSC
                             if (window.api && window.api.osc && result.label) {
-                                const clsName = classesRef.current.find(c => c.id === result.label)?.name || result.label;
-                                window.api.osc.send('127.0.0.1', 12000, '/ml/classification', [result.label, clsName]);
+                                window.api.osc.send('127.0.0.1', 12000, '/ml/classification', [mapped.classId, mapped.label]);
                             }
                             // Broadcast via WebSocket
                             if (window.api && window.api.ws) {
                                 window.api.ws.broadcast('prediction', {
-                                    ...result,
-                                    labelName: classesRef.current.find(c => c.id === result.label)?.name || result.label,
+                                    ...mapped,
                                     protocol: protocolRef.current,
                                     deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
                                     serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
@@ -571,14 +610,13 @@ function App() {
                     if (result) {
                         setPrediction(result);
                         setLastError(null);
+                        const mapped = buildClassificationBroadcast(result, classesRef.current);
                         if (window.api && window.api.osc && result.label) {
-                            const clsName = classesRef.current.find(c => c.id === result.label)?.name || result.label;
-                            window.api.osc.send('127.0.0.1', 12000, '/ml/classification', [result.label, clsName]);
+                            window.api.osc.send('127.0.0.1', 12000, '/ml/classification', [mapped.classId, mapped.label]);
                         }
                         if (window.api && window.api.ws) {
                             window.api.ws.broadcast('prediction', {
-                                ...result,
-                                labelName: classesRef.current.find(c => c.id === result.label)?.name || result.label,
+                                ...mapped,
                                 protocol: protocolRef.current,
                                 deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
                                 serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
@@ -595,16 +633,15 @@ function App() {
                     if (result) {
                         setPrediction(result);
                         setLastError(null);
+                        const mapped = buildClassificationBroadcast(result, classesRef.current);
 
                         // Broadcast Classification (OSC)
                         if (window.api && window.api.osc && result.label) {
-                            const clsName = classesRef.current.find(c => c.id === result.label)?.name || result.label;
-                            window.api.osc.send('127.0.0.1', 12000, '/ml/classification', [result.label, clsName]);
+                            window.api.osc.send('127.0.0.1', 12000, '/ml/classification', [mapped.classId, mapped.label]);
                         }
                         if (window.api && window.api.ws) {
                             window.api.ws.broadcast('prediction', {
-                                ...result,
-                                labelName: classesRef.current.find(c => c.id === result.label)?.name || result.label,
+                                ...mapped,
                                 protocol: protocolRef.current,
                                 deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
                                 serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
@@ -627,17 +664,17 @@ function App() {
                     if (result) {
                         setPrediction(result);
                         setLastError(null);
+                        const mappedReg = buildRegressionBroadcast(result, outputsRef.current);
 
                         // Broadcast Regression Outputs (OSC)
                         if (window.api && window.api.osc) {
-                            Object.entries(result.regression).forEach(([id, val]) => {
-                                window.api.osc.send('127.0.0.1', 12000, '/ml/regression', [id, val]);
+                            Object.entries(mappedReg.regression).forEach(([name, val]) => {
+                                window.api.osc.send('127.0.0.1', 12000, '/ml/regression', [name, val]);
                             });
                         }
                         if (window.api && window.api.ws) {
                             window.api.ws.broadcast('prediction', {
-                                ...result,
-                                labelName: 'regression',
+                                ...mappedReg,
                                 protocol: protocolRef.current,
                                 deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
                                 serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
@@ -1005,24 +1042,37 @@ function App() {
 
                 if (res) {
                     setPrediction(res);
-                    const labelName = res.label
-                        ? (classes.find(c => c.id === res.label)?.name || res.label)
-                        : null;
 
-                    // Broadcast (OSC)
-                    if (window.api && window.api.osc && res.label) {
-                        window.api.osc.send('127.0.0.1', 12000, '/ml/classification', [res.label, labelName]);
-                    }
-
-                    // Broadcast (WS/Serial)
-                    if (window.api && window.api.ws) {
-                        window.api.ws.broadcast('prediction', {
-                            ...res,
-                            labelName: labelName,
-                            protocol: protocolRef.current,
-                            deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
-                            serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
-                        });
+                    if (res.label) {
+                        // Classification
+                        const mapped = buildClassificationBroadcast(res, classes);
+                        if (window.api && window.api.osc) {
+                            window.api.osc.send('127.0.0.1', 12000, '/ml/classification', [mapped.classId, mapped.label]);
+                        }
+                        if (window.api && window.api.ws) {
+                            window.api.ws.broadcast('prediction', {
+                                ...mapped,
+                                protocol: protocolRef.current,
+                                deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
+                                serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
+                            });
+                        }
+                    } else if (res.regression) {
+                        // Regression
+                        const mappedReg = buildRegressionBroadcast(res, outputs);
+                        if (window.api && window.api.osc) {
+                            Object.entries(mappedReg.regression).forEach(([name, val]) => {
+                                window.api.osc.send('127.0.0.1', 12000, '/ml/regression', [name, val]);
+                            });
+                        }
+                        if (window.api && window.api.ws) {
+                            window.api.ws.broadcast('prediction', {
+                                ...mappedReg,
+                                protocol: protocolRef.current,
+                                deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
+                                serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
+                            });
+                        }
                     }
                 }
             } else {
@@ -1038,30 +1088,37 @@ function App() {
                 // Add labelName for Consistent Output
                 if (res) {
                     setPrediction(res);
-                    const labelName = trainingMode === 'classification' && res.label
-                        ? (classes.find(c => c.id === res.label)?.name || res.label)
-                        : null;
 
-                    // Broadcast (OSC)
-                    if (window.api && window.api.osc) {
-                        if (res.label) {
-                            window.api.osc.send('127.0.0.1', 12000, '/ml/classification', [res.label, labelName]);
-                        } else if (res.regression) {
-                            Object.entries(res.regression).forEach(([id, val]) => {
-                                window.api.osc.send('127.0.0.1', 12000, '/ml/regression', [id, val]);
+                    if (trainingMode === 'classification' && res.label) {
+                        // Classification
+                        const mapped = buildClassificationBroadcast(res, classes);
+                        if (window.api && window.api.osc) {
+                            window.api.osc.send('127.0.0.1', 12000, '/ml/classification', [mapped.classId, mapped.label]);
+                        }
+                        if (window.api && window.api.ws) {
+                            window.api.ws.broadcast('prediction', {
+                                ...mapped,
+                                protocol: protocolRef.current,
+                                deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
+                                serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
                             });
                         }
-                    }
-
-                    // Broadcast (WS/Serial)
-                    if (window.api && window.api.ws) {
-                        window.api.ws.broadcast('prediction', {
-                            ...res,
-                            labelName: labelName,
-                            protocol: protocolRef.current,
-                            deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
-                            serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
-                        });
+                    } else if (res.regression) {
+                        // Regression
+                        const mappedReg = buildRegressionBroadcast(res, outputs);
+                        if (window.api && window.api.osc) {
+                            Object.entries(mappedReg.regression).forEach(([name, val]) => {
+                                window.api.osc.send('127.0.0.1', 12000, '/ml/regression', [name, val]);
+                            });
+                        }
+                        if (window.api && window.api.ws) {
+                            window.api.ws.broadcast('prediction', {
+                                ...mappedReg,
+                                protocol: protocolRef.current,
+                                deviceId: protocolRef.current === 'serial' ? targetDeviceIdRef.current : null,
+                                serialFormat: protocolRef.current === 'serial' ? serialFormatRef.current : null
+                            });
+                        }
                     }
                 }
             }

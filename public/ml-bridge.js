@@ -150,7 +150,7 @@ class MLBridge {
 
     /**
      * Listen for a specific Classification Class
-     * @param {string} label - Class ID or Name (e.g. "class_1" or "Jump")
+     * @param {string} label - Class Name (e.g. "Thumbs Up", "Open Hand")
      * @param {function} callback - (confidence) => {}
      */
     onClassify(label, callback) {
@@ -163,7 +163,7 @@ class MLBridge {
 
     /**
      * Listen for a specific Regression Output
-     * @param {string} id - Output ID (e.g. "out_1")
+     * @param {string} id - Output Name (e.g. "Parameter 1")
      * @param {function} callback - (value) => {}
      */
     onRegression(id, callback) {

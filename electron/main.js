@@ -271,8 +271,7 @@ async function sendToSerialBridge(deviceId, predictionData) {
     // Apply appropriate throttling
     if (isClassification) {
         // Classification: throttle by label change
-        // Use labelName for comparison (human-readable name)
-        const currentLabel = predictionData.labelName || predictionData.label;
+        const currentLabel = predictionData.label;
         if (currentLabel === lastSentLabel) {
             return; // Skip - same prediction
         }
@@ -292,9 +291,8 @@ async function sendToSerialBridge(deviceId, predictionData) {
         let message;
 
         if (isClassification) {
-            // Classification formatting
-            // Use labelName if available (human-readable), fallback to label (ID)
-            const label = predictionData.labelName || predictionData.label;
+            // Classification formatting — label is human-readable class name
+            const label = predictionData.label;
 
             if (predictionData.serialFormat === 'csv') {
                 // CSV: label,confidence
@@ -314,7 +312,7 @@ async function sendToSerialBridge(deviceId, predictionData) {
                 const values = Object.values(predictionData.regression);
                 message = values.map(v => v.toFixed(2)).join(',');
             } else {
-                // JSON: {"out_1":0.48,"out_2":1.00}
+                // JSON: {"Parameter 1":0.48,"Parameter 2":1.00}
                 message = JSON.stringify(predictionData.regression);
             }
         }

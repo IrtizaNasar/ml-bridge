@@ -266,7 +266,7 @@ ML Bridge has **3 tabs** in the left sidebar:
 | **DATASET** | Browse and manage all recorded samples per class |
 
 > [!TIP]
-> You'll spend most of your time in the **TRAINING** tab. Start there after selecting your input source in HUB.
+> You'll spend most of your time in the **TRAINING** tab. Start there after selecting your input source in Main Screen.
 
 ---
 
@@ -274,7 +274,7 @@ ML Bridge has **3 tabs** in the left sidebar:
 
 New to ML Bridge? Follow this step-by-step walkthrough using your webcam:
 
-1. **Open ML Bridge** and go to the **HUB** tab
+1. **Open ML Bridge** and go to the **Main Screen** tab
 2. Click **WEBCAM** as your input source — you should see your camera feed
 3. Make sure **Classification** mode is selected (not Regression)
 4. Go to the **TRAINING** tab
@@ -339,8 +339,8 @@ ML Bridge broadcasts results to `127.0.0.1:12000` (configurable).
 *   **Example**: `/ml/classification` `["class_1", "Neutral"]`
 
 **Regression Address**: `/ml/regression`
-*   **Args**: `[OutputID (string), Value (float)]`
-*   **Example**: `/ml/regression` `["out_1", 0.75]`
+*   **Args**: `[OutputName (string), Value (float)]`
+*   **Example**: `/ml/regression` `["Parameter 1", 0.75]`
 
 ### Arduino Integration
 
@@ -369,7 +369,7 @@ Send predictions directly to Arduino or other microcontrollers via Serial Bridge
 
 #### Example: LED Control
 
-Control an LED based on classification predictions (class_1 = ON, class_2 = OFF).
+Control an LED based on classification predictions (Class 1 = ON, Class 2 = OFF).
 
 **Wiring:**
 - LED positive (long leg) → Pin 2
@@ -404,7 +404,7 @@ void processData(String data) {
   data.trim();
   String label = "";
   
-  // Parse JSON: {"label":"class_1","confidence":0.85}
+  // Parse JSON: {"label":"Class 1","confidence":0.85}
   if (data.indexOf("{") >= 0) {
     int labelStart = data.indexOf("\"label\":\"") + 9;
     int labelEnd = data.indexOf("\"", labelStart);
@@ -412,7 +412,7 @@ void processData(String data) {
       label = data.substring(labelStart, labelEnd);
     }
   }
-  // Parse CSV: class_1,0.85
+  // Parse CSV: Class 1,0.85
   else if (data.indexOf(",") > 0) {
     label = data.substring(0, data.indexOf(","));
   }
@@ -421,17 +421,17 @@ void processData(String data) {
     label = data;
   }
   
-  // Control LED
-  if (label.indexOf("class_1") >= 0) {
+  // Control LED based on class name
+  if (label == "Class 1") {
     digitalWrite(LED_PIN, HIGH);
-  } else if (label.indexOf("class_2") >= 0) {
+  } else if (label == "Class 2") {
     digitalWrite(LED_PIN, LOW);
   }
 }
 ```
 
 **USB Serial Sketch (Regression)** ([`arduino_serial_regression.ino`](arduino_serial_regression.ino)):
-Controls an LED brightness (PWM) based on "out_1" value.
+Controls an LED brightness (PWM) based on "Parameter 1" value.
 ```cpp
 const int LED_PIN = 3; // Must be PWM pin (3, 5, 6, 9, 10, 11 on Uno)
 String receivedData = "";
@@ -460,13 +460,13 @@ void processData(String data) {
   float value = 0.0;
   bool found = false;
 
-  // JSON: {"out_1":0.75}
-  if (data.indexOf("out_1") >= 0) {
-    int key = data.indexOf("out_1") + 7; // after "out_1":
-    if (data.charAt(key) == '"') key++; // skip quote if present
-    if (data.charAt(key) == ':') key++;
-    value = data.substring(key).toFloat();
-    found = true;
+  // JSON: {"Parameter 1":0.75}
+  if (data.indexOf("Parameter 1") >= 0) {
+    int key = data.indexOf(":", data.indexOf("Parameter 1"));
+    if (key >= 0) {
+      value = data.substring(key + 1).toFloat();
+      found = true;
+    }
   }
   // CSV: 0.75
   else if (data.length() > 0 && (data.charAt(0) >= '0' && data.charAt(0) <= '9')) {
@@ -522,11 +522,11 @@ void loop() {
 #### Data Formats
 
 **Classification:**
-- JSON: `{"label":"class_1","confidence":0.85}`
-- CSV: `class_1,0.85`
+- JSON: `{"label":"Class 1","confidence":0.85}`
+- CSV: `Class 1,0.85`
 
 **Regression:**
-- JSON: `{"out_1":0.48,"out_2":1.00}`
+- JSON: `{"Parameter 1":0.48,"Parameter 2":1.00}`
 - CSV: `0.48,1.00`
 
 #### Troubleshooting
